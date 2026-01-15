@@ -13,6 +13,12 @@ struct ContentView: View {
     @State private var customAmount = ""
     @FocusState private var isCustomFieldFocused: Bool
     
+    // State for reset alert
+    @State private var showResetAlert = false
+    
+    // State for water animation trigger
+    @State private var waterAddedTrigger = 0
+    
     // Dynamic goal from AppStorage
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
     
@@ -25,8 +31,8 @@ struct ContentView: View {
         return todayEntries.reduce(0) { $0 + $1.amountML }
     }
     
-    // Calculate progress for visual circle (capped at 1.0)
-    private var circleProgress: Double {
+    // Calculate progress for visual (capped at 1.0)
+    private var progress: Double {
         let ratio = Double(todayTotal) / Double(dailyGoalML)
         return min(ratio, 1.0)
     }
@@ -49,50 +55,16 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Progress Circle
-                    ZStack {
-                        // Background circle
-                        Circle()
-                            .stroke(lineWidth: 20)
-                            .foregroundStyle(.gray.opacity(0.2))
-                        
-                        // Progress circle
-                        Circle()
-                            .trim(from: 0, to: circleProgress)
-                            .stroke(style: StrokeStyle(lineWidth: 20, lineCap: .round))
-                            .foregroundStyle(circleProgress >= 1.0 ? .green : .blue)
-                            .rotationEffect(.degrees(-90))
-                            .animation(.easeInOut(duration: 0.5), value: circleProgress)
-                        
-                        // Center text
-                        VStack(spacing: 8) {
-                            Text("\(todayTotal)")
-                                .font(.system(size: 48, weight: .bold))
-                                .contentTransition(.numericText())
-                            Text("/ \(dailyGoalML) mL")
-                                .font(.title3)
-                                .foregroundStyle(.secondary)
-                            Text("\(percentageValue)%")
-                                .font(.headline)
-                                .foregroundStyle(circleProgress >= 1.0 ? .green : .blue)
-                        }
-                        
-                        // Goal reached badge
-                        if circleProgress >= 1.0 {
-                            VStack {
-                                Spacer()
-                                HStack {
-                                    Spacer()
-                                    Image(systemName: "checkmark.seal.fill")
-                                        .font(.title)
-                                        .foregroundStyle(.green)
-                                        .offset(x: 10, y: 10)
-                                }
-                            }
-                        }
-                    }
-                    .frame(width: 250, height: 250)
-                    .padding(.top, 40)
+                    // Water Glass with Enhanced Physics
+                    EnhancedWaterGlassView(
+                        progress: progress,
+                        currentAmount: todayTotal,
+                        goalAmount: dailyGoalML,
+                        percentage: percentageValue,
+                        waterAddedTrigger: waterAddedTrigger
+                    )
+                    .frame(height: 300)
+                    .padding(.top, 30)
                     
                     // Quick add buttons (no label)
                     HStack(spacing: 20) {
@@ -101,7 +73,7 @@ struct ContentView: View {
                         QuickAddButton(amount: 500, action: addWater)
                     }
                     .padding(.horizontal)
-                    .padding(.top, 40)
+                    .padding(.top, 10)
                     
                     // Custom amount input (inline)
                     HStack(spacing: 12) {
@@ -160,7 +132,7 @@ struct ContentView: View {
             .overlay(
                 // Celebration overlay
                 Group {
-                    if circleProgress >= 1.0 {
+                    if progress >= 1.0 {
                         ZStack {
                             Color.black.opacity(0.3)
                                 .ignoresSafeArea()
@@ -193,22 +165,23 @@ struct ContentView: View {
         }
     }
     
-    @State private var showResetAlert = false
-    
     // Function to add water entry with haptics & celebration
     private func addWater(amount: Int) {
-        let oldProgress = circleProgress
+        let oldProgress = progress
         
         // Add entry
         let entry = WaterEntry(timestamp: Date(), amountML: amount)
         modelContext.insert(entry)
+        
+        // Trigger water animation
+        waterAddedTrigger += 1
         
         // Light haptic feedback for button tap
         HapticManager.shared.impact(style: .light)
         
         // Check if goal was just reached
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if oldProgress < 1.0 && circleProgress >= 1.0 {
+            if oldProgress < 1.0 && progress >= 1.0 {
                 // Goal reached! Success haptic + celebration
                 HapticManager.shared.notification(type: .success)
                 confettiCounter = 1
@@ -239,7 +212,245 @@ struct ContentView: View {
     }
 }
 
-// Reusable button component
+// MARK: - Enhanced Water Glass Component
+struct EnhancedWaterGlassView: View {
+    let progress: Double
+    let currentAmount: Int
+    let goalAmount: Int
+    let percentage: Int
+    let waterAddedTrigger: Int
+    
+    // Animation States
+    @State private var wavePhase: Double = 0
+    @State private var bubbles: [BubbleParticle] = []
+    
+    // Physics Constants
+    let glassThickness: CGFloat = 4
+    
+    var body: some View {
+        GeometryReader { geometry in
+            let width = min(geometry.size.width * 0.65, 220)
+            let height = geometry.size.height * 0.85
+            let waterHeight = height * CGFloat(min(max(progress, 0.05), 1.0))
+            
+            ZStack {
+                // 1. Back of Glass (Translucent)
+                GlassShape()
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.1), .white.opacity(0.05)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: width, height: height)
+                
+                // 2. Water Body
+                ZStack(alignment: .bottom) {
+                    // Main Liquid
+                    WaterWaveShape(progress: progress, phase: wavePhase)
+                        .fill(
+                            LinearGradient(
+                                colors: progress >= 1.0 ? [
+                                    Color.green.opacity(0.4),
+                                    Color.green,
+                                    Color.green.opacity(0.9)
+                                ] : [
+                                    Color.blue.opacity(0.3),
+                                    Color.blue,
+                                    Color(red: 0, green: 0.2, blue: 0.8)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: width - glassThickness * 2, height: height - glassThickness)
+                        .mask(GlassShape().padding(glassThickness))
+                    
+                    // Bubbles Layer
+                    TimelineView(.animation) { timeline in
+                        Canvas { context, size in
+                            for bubble in bubbles {
+                                let rect = CGRect(
+                                    x: bubble.x * size.width,
+                                    y: size.height - (bubble.y * size.height),
+                                    width: bubble.size,
+                                    height: bubble.size
+                                )
+                                context.opacity = bubble.opacity
+                                context.fill(Circle().path(in: rect), with: .color(.white.opacity(0.6)))
+                            }
+                        }
+                    }
+                    .frame(width: width - glassThickness * 3, height: waterHeight)
+                    .mask(GlassShape().padding(glassThickness))
+                }
+
+                // 3. Front Glass Glare (Specular Highlights)
+                GlassShape()
+                    .stroke(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .white.opacity(0.1), location: 0),
+                                .init(color: .white.opacity(0.6), location: 0.2),
+                                .init(color: .white.opacity(0.1), location: 0.4),
+                                .init(color: .white.opacity(0.1), location: 1)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 2
+                    )
+                    .frame(width: width, height: height)
+                
+                // Highlighting glare curve
+                Path { path in
+                    path.move(to: CGPoint(x: width * 0.2, y: height * 0.1))
+                    path.addQuadCurve(
+                        to: CGPoint(x: width * 0.2, y: height * 0.9),
+                        control: CGPoint(x: width * 0.15, y: height * 0.5)
+                    )
+                }
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.0), .white.opacity(0.4), .white.opacity(0.0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 4
+                )
+                .frame(width: width, height: height)
+
+                // 4. Text Overlay
+                VStack(spacing: 4) {
+                    Text("\(percentage)%")
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundStyle(progress > 0.5 ? .white : .blue)
+                        .shadow(color: .black.opacity(progress > 0.5 ? 0.2 : 0), radius: 2)
+                    
+                    Text("\(currentAmount) / \(goalAmount) mL")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(progress > 0.5 ? .white.opacity(0.8) : .secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
+        .onAppear {
+            startWaveAnimation()
+        }
+        .onChange(of: waterAddedTrigger) { _, _ in
+            spawnBubbles()
+        }
+    }
+    
+    private func startWaveAnimation() {
+        Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
+            wavePhase += 0.02
+        }
+    }
+    
+    private func spawnBubbles() {
+        for _ in 0..<15 {
+            let bubble = BubbleParticle()
+            bubbles.append(bubble)
+        }
+        
+        Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
+            if bubbles.isEmpty { timer.invalidate() }
+            
+            var activeBubbles: [BubbleParticle] = []
+            
+            for var bubble in bubbles {
+                bubble.y += bubble.speed
+                bubble.x += sin(bubble.y * 10) * 0.005
+                
+                if bubble.y < 1.0 {
+                    activeBubbles.append(bubble)
+                }
+            }
+            bubbles = activeBubbles
+        }
+    }
+}
+
+// MARK: - Shapes
+
+struct GlassShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let bottomWidth = rect.width * 0.75
+        let taper = (rect.width - bottomWidth) / 2
+        
+        path.move(to: CGPoint(x: 0, y: 0))
+        path.addLine(to: CGPoint(x: taper, y: rect.height - 15))
+        path.addQuadCurve(
+            to: CGPoint(x: taper + 15, y: rect.height),
+            control: CGPoint(x: taper, y: rect.height)
+        )
+        path.addLine(to: CGPoint(x: rect.width - taper - 15, y: rect.height))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.width - taper, y: rect.height - 15),
+            control: CGPoint(x: rect.width - taper, y: rect.height)
+        )
+        path.addLine(to: CGPoint(x: rect.width, y: 0))
+        
+        return path
+    }
+}
+
+struct WaterWaveShape: Shape {
+    var progress: Double
+    var phase: Double
+    
+    var animatableData: Double {
+        get { phase }
+        set { phase = newValue }
+    }
+    
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let width = rect.width
+        let height = rect.height
+        
+        let waterHeight = height * CGFloat(progress)
+        let topY = height - waterHeight
+        
+        path.move(to: CGPoint(x: 0, y: height))
+        path.addLine(to: CGPoint(x: width, y: height))
+        path.addLine(to: CGPoint(x: width, y: topY))
+        
+        if progress > 0 && progress < 1.0 {
+            for x in stride(from: width, through: 0, by: -2) {
+                let relativeX = x / width
+                let sine1 = sin(relativeX * 4 * .pi + phase) * 4
+                let sine2 = sin(relativeX * 6 * .pi + phase * 1.5) * 2
+                
+                let y = topY + sine1 + sine2
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        } else {
+            path.addLine(to: CGPoint(x: 0, y: topY))
+        }
+        
+        path.closeSubpath()
+        return path
+    }
+}
+
+// MARK: - Particle System Models
+
+struct BubbleParticle: Identifiable {
+    let id = UUID()
+    var x: Double = Double.random(in: 0.1...0.9)
+    var y: Double = 0
+    var speed: Double = Double.random(in: 0.01...0.02)
+    var size: Double = Double.random(in: 4...10)
+    var opacity: Double = Double.random(in: 0.4...0.8)
+}
+
+// MARK: - Reusable Components
+
 struct QuickAddButton: View {
     let amount: Int
     let action: (Int) -> Void

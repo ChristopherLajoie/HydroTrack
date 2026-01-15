@@ -1,15 +1,14 @@
 import SwiftUI
 
 struct SettingsView: View {
-    // AppStorage automatically persists to UserDefaults
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
     @AppStorage("notifStartHour") private var notifStartHour = 9
     @AppStorage("notifEndHour") private var notifEndHour = 21
     @AppStorage("notifIntervalHours") private var notifIntervalHours = 2
     @AppStorage("notificationsEnabled") private var notificationsEnabled = false
     
-    // Focus state for keyboard dismissal
     @FocusState private var isGoalFieldFocused: Bool
+    @State private var showPermissionDeniedAlert = false
     
     var body: some View {
         NavigationStack {
@@ -51,56 +50,36 @@ struct SettingsView: View {
                         }
                     }
                     .onChange(of: notificationsEnabled) { oldValue, newValue in
-                        if newValue {
-                            // Request permission and schedule (Phase 4)
-                            HapticManager.shared.impact(style: .medium)
-                        } else {
-                            // Cancel all notifications (Phase 4)
-                            HapticManager.shared.impact(style: .light)
+                        Task {
+                            await handleNotificationToggle(enabled: newValue)
                         }
                     }
                     
                     if notificationsEnabled {
-                        // Start time picker
                         Picker("Start Time", selection: $notifStartHour) {
                             ForEach(6..<24) { hour in
-                                Text("\(formatHour(hour))")
-                                    .tag(hour)
+                                Text(hourString(hour)).tag(hour)
                             }
                         }
                         
-                        // End time picker
                         Picker("End Time", selection: $notifEndHour) {
                             ForEach(6..<24) { hour in
-                                Text("\(formatHour(hour))")
-                                    .tag(hour)
+                                Text(hourString(hour)).tag(hour)
                             }
                         }
                         
-                        // Interval picker
                         Picker("Remind Every", selection: $notifIntervalHours) {
                             Text("1 hour").tag(1)
                             Text("2 hours").tag(2)
                             Text("3 hours").tag(3)
                             Text("4 hours").tag(4)
                         }
-                        
-                        // Preview of notification times
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("You'll receive reminders at:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            
-                            Text(notificationTimesPreview())
-                                .font(.caption)
-                                .foregroundStyle(.blue)
-                        }
                     }
                 } header: {
                     Text("Reminders")
                 } footer: {
                     if notificationsEnabled {
-                        Text("Notifications will remind you to drink water during your active hours")
+                        Text("Changes are saved automatically")
                     }
                 }
                 
@@ -123,30 +102,64 @@ struct SettingsView: View {
                     Text("About")
                 }
             }
-            .navigationTitle("Settings")
+            .safeAreaInset(edge: .top) {
+                Color.clear.frame(height: 8)
+            }
             .dismissKeyboardOnTap()
+            .alert("Notifications Disabled", isPresented: $showPermissionDeniedAlert) {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    notificationsEnabled = false
+                }
+            } message: {
+                Text("Please enable notifications in Settings to receive water reminders.")
+            }
+            .onDisappear {
+                if notificationsEnabled {
+                    Task {
+                        await NotificationManager.shared.scheduleWaterReminders(
+                            startHour: notifStartHour,
+                            endHour: notifEndHour,
+                            intervalHours: notifIntervalHours
+                        )
+                    }
+                }
+            }
         }
     }
     
-    // Helper function to format hours
-    private func formatHour(_ hour: Int) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:00 a"
-        let date = Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date()) ?? Date()
-        return formatter.string(from: date)
+    private func hourString(_ hour: Int) -> String {
+        let period = hour >= 12 ? "PM" : "AM"
+        let displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour)
+        return "\(displayHour):00 \(period)"
     }
     
-    // Generate preview of notification times
-    private func notificationTimesPreview() -> String {
-        var times: [String] = []
-        var currentHour = notifStartHour
-        
-        while currentHour <= notifEndHour {
-            times.append(formatHour(currentHour))
-            currentHour += notifIntervalHours
+    private func handleNotificationToggle(enabled: Bool) async {
+        if enabled {
+            let granted = await NotificationManager.shared.requestAuthorization()
+            
+            if granted {
+                await NotificationManager.shared.scheduleWaterReminders(
+                    startHour: notifStartHour,
+                    endHour: notifEndHour,
+                    intervalHours: notifIntervalHours
+                )
+                HapticManager.shared.notification(type: .success)
+            } else {
+                await MainActor.run {
+                    notificationsEnabled = false
+                    showPermissionDeniedAlert = true
+                }
+                HapticManager.shared.notification(type: .error)
+            }
+        } else {
+            NotificationManager.shared.cancelAllNotifications()
+            HapticManager.shared.impact(style: .light)
         }
-        
-        return times.joined(separator: ", ")
     }
 }
 

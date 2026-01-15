@@ -13,9 +13,6 @@ struct ContentView: View {
     @State private var customAmount = ""
     @FocusState private var isCustomFieldFocused: Bool
     
-    // State for reset confirmation
-    @State private var showResetAlert = false
-    
     // Dynamic goal from AppStorage
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
     
@@ -95,7 +92,7 @@ struct ContentView: View {
                         }
                     }
                     .frame(width: 250, height: 250)
-                    .padding(.top, 20)
+                    .padding(.top, 40)
                     
                     // Quick add buttons (no label)
                     HStack(spacing: 20) {
@@ -143,7 +140,7 @@ struct ContentView: View {
                     }) {
                         HStack {
                             Image(systemName: "arrow.counterclockwise")
-                            Text("Reset")
+                            Text("Reset Today")
                         }
                         .font(.headline)
                         .frame(maxWidth: .infinity)
@@ -157,9 +154,9 @@ struct ContentView: View {
                     
                     Spacer()
                 }
+                .padding(.top, 20)
             }
             .dismissKeyboardOnTap()
-            .navigationTitle("Today")
             .overlay(
                 // Celebration overlay
                 Group {
@@ -195,6 +192,8 @@ struct ContentView: View {
             }
         }
     }
+    
+    @State private var showResetAlert = false
     
     // Function to add water entry with haptics & celebration
     private func addWater(amount: Int) {

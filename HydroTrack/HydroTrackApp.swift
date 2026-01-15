@@ -25,8 +25,8 @@ struct HydroTrackApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()  // Changed from ContentView()
         }
-        .modelContainer(sharedModelContainer)
+        .modelContainer(for: WaterEntry.self)
     }
 }

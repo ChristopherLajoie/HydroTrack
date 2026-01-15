@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import ConfettiSwiftUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -11,11 +10,14 @@ struct ContentView: View {
     @State private var previousProgress: Double = 0
     
     // State for custom amount
-    @State private var showCustomInput = false
     @State private var customAmount = ""
+    @FocusState private var isCustomFieldFocused: Bool
     
-    // Hardcoded goal for now
-    private let dailyGoalML = 2000
+    // State for reset confirmation
+    @State private var showResetAlert = false
+    
+    // Dynamic goal from AppStorage
+    @AppStorage("dailyGoalML") private var dailyGoalML = 2000
     
     // Calculate today's total
     private var todayTotal: Int {
@@ -26,96 +28,142 @@ struct ContentView: View {
         return todayEntries.reduce(0) { $0 + $1.amountML }
     }
     
-    // Calculate progress (0.0 to 1.0)
-    private var progress: Double {
+    // Calculate progress for visual circle (capped at 1.0)
+    private var circleProgress: Double {
         let ratio = Double(todayTotal) / Double(dailyGoalML)
         return min(ratio, 1.0)
     }
     
+    // Calculate actual percentage (can go above 100%)
+    private var percentageValue: Int {
+        let ratio = Double(todayTotal) / Double(dailyGoalML)
+        return Int(ratio * 100)
+    }
+    
+    private var customAmountValue: Int {
+        Int(customAmount) ?? 0
+    }
+    
+    private var isCustomAmountValid: Bool {
+        customAmountValue > 0 && customAmountValue <= 5000
+    }
+    
     var body: some View {
         NavigationStack {
-            VStack(spacing: 30) {
-                // Progress Circle
-                ZStack {
-                    // Background circle
-                    Circle()
-                        .stroke(lineWidth: 20)
-                        .foregroundStyle(.gray.opacity(0.2))
-                    
-                    // Progress circle
-                    Circle()
-                        .trim(from: 0, to: progress)
-                        .stroke(style: StrokeStyle(lineWidth: 20, lineCap: .round))
-                        .foregroundStyle(progress >= 1.0 ? .green : .blue)
-                        .rotationEffect(.degrees(-90))
-                        .animation(.easeInOut(duration: 0.5), value: progress)
-                    
-                    // Center text
-                    VStack(spacing: 8) {
-                        Text("\(todayTotal)")
-                            .font(.system(size: 48, weight: .bold))
-                            .contentTransition(.numericText())
-                        Text("/ \(dailyGoalML) mL")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                        Text("\(Int(progress * 100))%")
-                            .font(.headline)
-                            .foregroundStyle(progress >= 1.0 ? .green : .blue)
-                    }
-                    
-                    // Goal reached badge
-                    if progress >= 1.0 {
-                        VStack {
-                            Spacer()
-                            HStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Progress Circle
+                    ZStack {
+                        // Background circle
+                        Circle()
+                            .stroke(lineWidth: 20)
+                            .foregroundStyle(.gray.opacity(0.2))
+                        
+                        // Progress circle
+                        Circle()
+                            .trim(from: 0, to: circleProgress)
+                            .stroke(style: StrokeStyle(lineWidth: 20, lineCap: .round))
+                            .foregroundStyle(circleProgress >= 1.0 ? .green : .blue)
+                            .rotationEffect(.degrees(-90))
+                            .animation(.easeInOut(duration: 0.5), value: circleProgress)
+                        
+                        // Center text
+                        VStack(spacing: 8) {
+                            Text("\(todayTotal)")
+                                .font(.system(size: 48, weight: .bold))
+                                .contentTransition(.numericText())
+                            Text("/ \(dailyGoalML) mL")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                            Text("\(percentageValue)%")
+                                .font(.headline)
+                                .foregroundStyle(circleProgress >= 1.0 ? .green : .blue)
+                        }
+                        
+                        // Goal reached badge
+                        if circleProgress >= 1.0 {
+                            VStack {
                                 Spacer()
-                                Image(systemName: "checkmark.seal.fill")
-                                    .font(.title)
-                                    .foregroundStyle(.green)
-                                    .offset(x: 10, y: 10)
+                                HStack {
+                                    Spacer()
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(.title)
+                                        .foregroundStyle(.green)
+                                        .offset(x: 10, y: 10)
+                                }
                             }
                         }
                     }
-                }
-                .frame(width: 250, height: 250)
-                .padding(.top, 40)
-                
-                // Quick add buttons
-                VStack(spacing: 16) {
-                    Text("Quick Add")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
+                    .frame(width: 250, height: 250)
+                    .padding(.top, 20)
                     
+                    // Quick add buttons (no label)
                     HStack(spacing: 20) {
                         QuickAddButton(amount: 100, action: addWater)
                         QuickAddButton(amount: 250, action: addWater)
                         QuickAddButton(amount: 500, action: addWater)
                     }
+                    .padding(.horizontal)
+                    .padding(.top, 40)
                     
-                    // Custom amount button
-                    Button(action: {
-                        showCustomInput = true
-                    }) {
+                    // Custom amount input (inline)
+                    HStack(spacing: 12) {
                         HStack {
-                            Image(systemName: "pencil.circle.fill")
-                            Text("Custom Amount")
+                            TextField("Custom amount", text: $customAmount)
+                                .keyboardType(.numberPad)
+                                .font(.title3)
+                                .multilineTextAlignment(.center)
+                                .focused($isCustomFieldFocused)
+                            
+                            Text("mL")
+                                .foregroundStyle(.secondary)
                         }
-                        .frame(maxWidth: .infinity)
                         .padding()
                         .background(.gray.opacity(0.1))
-                        .foregroundStyle(.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        
+                        Button(action: {
+                            if isCustomAmountValid {
+                                addWater(amount: customAmountValue)
+                                customAmount = ""
+                                isCustomFieldFocused = false
+                            }
+                        }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 44))
+                                .foregroundStyle(isCustomAmountValid ? .blue : .gray.opacity(0.5))
+                        }
+                        .disabled(!isCustomAmountValid)
+                    }
+                    .padding(.horizontal)
+                    
+                    // Reset button
+                    Button(action: {
+                        showResetAlert = true
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.counterclockwise")
+                            Text("Reset")
+                        }
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(.red.opacity(0.1))
+                        .foregroundStyle(.red)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
+                    .padding(.horizontal)
+                    .padding(.top, 20)
+                    
+                    Spacer()
                 }
-                .padding(.horizontal)
-                
-                Spacer()
             }
+            .dismissKeyboardOnTap()
             .navigationTitle("Today")
             .overlay(
                 // Celebration overlay
                 Group {
-                    if progress >= 1.0 {
+                    if circleProgress >= 1.0 {
                         ZStack {
                             Color.black.opacity(0.3)
                                 .ignoresSafeArea()
@@ -137,18 +185,20 @@ struct ContentView: View {
                     }
                 }
             )
-            .sheet(isPresented: $showCustomInput) {
-                CustomAmountSheet(addWater: addWater, isPresented: $showCustomInput)
+            .alert("Reset Today's Data?", isPresented: $showResetAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Reset", role: .destructive) {
+                    resetTodayData()
+                }
+            } message: {
+                Text("This will delete all water entries for today. This action cannot be undone.")
             }
-
-
         }
     }
-
     
     // Function to add water entry with haptics & celebration
     private func addWater(amount: Int) {
-        let oldProgress = progress
+        let oldProgress = circleProgress
         
         // Add entry
         let entry = WaterEntry(timestamp: Date(), amountML: amount)
@@ -159,7 +209,7 @@ struct ContentView: View {
         
         // Check if goal was just reached
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if oldProgress < 1.0 && progress >= 1.0 {
+            if oldProgress < 1.0 && circleProgress >= 1.0 {
                 // Goal reached! Success haptic + celebration
                 HapticManager.shared.notification(type: .success)
                 confettiCounter = 1
@@ -171,7 +221,23 @@ struct ContentView: View {
             }
         }
     }
-
+    
+    // Function to reset today's data
+    private func resetTodayData() {
+        let today = Calendar.current.startOfDay(for: Date())
+        let todayEntries = allEntries.filter { entry in
+            Calendar.current.isDate(entry.timestamp, inSameDayAs: today)
+        }
+        
+        for entry in todayEntries {
+            modelContext.delete(entry)
+        }
+        
+        // Reset celebration counter
+        confettiCounter = 0
+        
+        HapticManager.shared.impact(style: .medium)
+    }
 }
 
 // Reusable button component
@@ -197,110 +263,6 @@ struct QuickAddButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
-    }
-}
-
-// Custom amount input sheet
-struct CustomAmountSheet: View {
-    let addWater: (Int) -> Void
-    @Binding var isPresented: Bool
-    
-    @State private var amountText = ""
-    @FocusState private var isFocused: Bool
-    
-    private var amount: Int {
-        Int(amountText) ?? 0
-    }
-    
-    private var isValid: Bool {
-        amount > 0 && amount <= 5000
-    }
-    
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 30) {
-                // Water drop icon
-                Image(systemName: "drop.fill")
-                    .font(.system(size: 80))
-                    .foregroundStyle(.blue)
-                    .padding(.top, 40)
-                
-                // Input field
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Enter Amount")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                    
-                    HStack {
-                        TextField("0", text: $amountText)
-                            .keyboardType(.numberPad)
-                            .font(.system(size: 48, weight: .bold))
-                            .multilineTextAlignment(.center)
-                            .focused($isFocused)
-                        
-                        Text("mL")
-                            .font(.title)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding()
-                    .background(.gray.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .padding(.horizontal)
-                
-                // Quick suggestions
-                HStack(spacing: 12) {
-                    ForEach([100, 250, 330, 500], id: \.self) { suggested in
-                        Button(action: {
-                            amountText = "\(suggested)"
-                            HapticManager.shared.impact(style: .soft)
-                        }) {
-                            Text("\(suggested)")
-                                .font(.subheadline)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(.blue.opacity(0.1))
-                                .foregroundStyle(.blue)
-                                .clipShape(Capsule())
-                        }
-                    }
-                }
-                
-                Spacer()
-                
-                // Add button
-                Button(action: {
-                    if isValid {
-                        addWater(amount)
-                        isPresented = false
-                        HapticManager.shared.impact(style: .medium)
-                    }
-                }) {
-                    Text("Add Water")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(isValid ? Color.blue : Color.gray.opacity(0.3))
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .disabled(!isValid)
-                .padding(.horizontal)
-                .padding(.bottom, 20)
-            }
-            .navigationTitle("Custom Amount")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        isPresented = false
-                    }
-                }
-            }
-            .onAppear {
-                isFocused = true
-            }
-        }
     }
 }
 

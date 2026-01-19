@@ -9,10 +9,6 @@ struct ContentView: View {
     @State private var confettiCounter = 0
     @State private var previousProgress: Double = 0
     
-    // State for custom amount
-    @State private var customAmount = ""
-    @FocusState private var isCustomFieldFocused: Bool
-    
     // State for reset alert
     @State private var showResetAlert = false
     
@@ -21,6 +17,13 @@ struct ContentView: View {
     
     // Dynamic goal from AppStorage
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
+    
+    // Containers from AppStorage
+    @AppStorage("containers") private var containersJSON = Container.defaults.toJSON()
+    
+    private var containers: [Container] {
+        Array<Container>.fromJSON(containersJSON)
+    }
     
     // Calculate today's total
     private var todayTotal: Int {
@@ -43,14 +46,6 @@ struct ContentView: View {
         return Int(ratio * 100)
     }
     
-    private var customAmountValue: Int {
-        Int(customAmount) ?? 0
-    }
-    
-    private var isCustomAmountValid: Bool {
-        customAmountValue > 0 && customAmountValue <= 5000
-    }
-    
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -66,45 +61,25 @@ struct ContentView: View {
                     .frame(height: 300)
                     .padding(.top, 30)
                     
-                    // Quick add buttons (no label)
-                    HStack(spacing: 20) {
-                        QuickAddButton(amount: 100, action: addWater)
-                        QuickAddButton(amount: 250, action: addWater)
-                        QuickAddButton(amount: 500, action: addWater)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 10)
-                    
-                    // Custom amount input (inline)
-                    HStack(spacing: 12) {
-                        HStack {
-                            TextField("Custom amount", text: $customAmount)
-                                .keyboardType(.numberPad)
-                                .font(.title3)
-                                .multilineTextAlignment(.center)
-                                .focused($isCustomFieldFocused)
-                            
-                            Text("mL")
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding()
-                        .background(.gray.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        
-                        Button(action: {
-                            if isCustomAmountValid {
-                                addWater(amount: customAmountValue)
-                                customAmount = ""
-                                isCustomFieldFocused = false
+                    // Container quick-add buttons
+                    if containers.isEmpty {
+                        Text("Add containers in Settings")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 10)
+                    } else {
+                        LazyVGrid(columns: [
+                            GridItem(.flexible()),
+                            GridItem(.flexible()),
+                            GridItem(.flexible())
+                        ], spacing: 16) {
+                            ForEach(containers.prefix(6)) { container in
+                                ContainerButton(container: container, action: addWater)
                             }
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 44))
-                                .foregroundStyle(isCustomAmountValid ? .blue : .gray.opacity(0.5))
                         }
-                        .disabled(!isCustomAmountValid)
+                        .padding(.horizontal)
+                        .padding(.top, 10)
                     }
-                    .padding(.horizontal)
                     
                     // Reset button
                     Button(action: {
@@ -212,6 +187,34 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Container Button Component
+struct ContainerButton: View {
+    let container: Container
+    let action: (Int) -> Void
+    
+    var body: some View {
+        Button(action: { action(container.volumeML) }) {
+            VStack(spacing: 8) {
+                Text(container.emoji)
+                    .font(.system(size: 32))
+                Text(container.name)
+                    .font(.caption.bold())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text("\(container.volumeML) mL")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(.blue.opacity(0.1))
+            .foregroundStyle(.blue)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Enhanced Water Glass Component
 struct EnhancedWaterGlassView: View {
     let progress: Double
@@ -220,11 +223,9 @@ struct EnhancedWaterGlassView: View {
     let percentage: Int
     let waterAddedTrigger: Int
     
-    // Animation States
     @State private var wavePhase: Double = 0
     @State private var bubbles: [BubbleParticle] = []
     
-    // Physics Constants
     let glassThickness: CGFloat = 4
     
     var body: some View {
@@ -247,7 +248,6 @@ struct EnhancedWaterGlassView: View {
                 
                 // 2. Water Body
                 ZStack(alignment: .bottom) {
-                    // Main Liquid
                     WaterWaveShape(progress: progress, phase: wavePhase)
                         .fill(
                             LinearGradient(
@@ -267,7 +267,6 @@ struct EnhancedWaterGlassView: View {
                         .frame(width: width - glassThickness * 2, height: height - glassThickness)
                         .mask(GlassShape().padding(glassThickness))
                     
-                    // Bubbles Layer
                     TimelineView(.animation) { timeline in
                         Canvas { context, size in
                             for bubble in bubbles {
@@ -286,7 +285,7 @@ struct EnhancedWaterGlassView: View {
                     .mask(GlassShape().padding(glassThickness))
                 }
 
-                // 3. Front Glass Glare (Specular Highlights)
+                // 3. Front Glass Glare
                 GlassShape()
                     .stroke(
                         LinearGradient(
@@ -303,7 +302,6 @@ struct EnhancedWaterGlassView: View {
                     )
                     .frame(width: width, height: height)
                 
-                // Highlighting glare curve
                 Path { path in
                     path.move(to: CGPoint(x: width * 0.2, y: height * 0.1))
                     path.addQuadCurve(
@@ -352,8 +350,7 @@ struct EnhancedWaterGlassView: View {
     
     private func spawnBubbles() {
         for _ in 0..<15 {
-            let bubble = BubbleParticle()
-            bubbles.append(bubble)
+            bubbles.append(BubbleParticle())
         }
         
         Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
@@ -375,7 +372,6 @@ struct EnhancedWaterGlassView: View {
 }
 
 // MARK: - Shapes
-
 struct GlassShape: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -438,8 +434,6 @@ struct WaterWaveShape: Shape {
     }
 }
 
-// MARK: - Particle System Models
-
 struct BubbleParticle: Identifiable {
     let id = UUID()
     var x: Double = Double.random(in: 0.1...0.9)
@@ -447,33 +441,6 @@ struct BubbleParticle: Identifiable {
     var speed: Double = Double.random(in: 0.01...0.02)
     var size: Double = Double.random(in: 4...10)
     var opacity: Double = Double.random(in: 0.4...0.8)
-}
-
-// MARK: - Reusable Components
-
-struct QuickAddButton: View {
-    let amount: Int
-    let action: (Int) -> Void
-    
-    var body: some View {
-        Button(action: { action(amount) }) {
-            VStack(spacing: 8) {
-                Image(systemName: "drop.fill")
-                    .font(.title2)
-                Text("+\(amount)")
-                    .font(.headline)
-                Text("mL")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-            .background(.blue.opacity(0.1))
-            .foregroundStyle(.blue)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 #Preview {

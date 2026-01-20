@@ -42,11 +42,11 @@ struct SettingsView: View {
                         TextField("Goal", value: $dailyGoalML, format: .number)
                             .keyboardType(.numberPad)
                             .font(.title2.bold())
-                            .multilineTextAlignment(.trailing)  // Changed from .leading to .trailing
-                            .fixedSize()  // Added this - makes it only as wide as needed
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize()
                             .focused($isGoalFieldFocused)
                         
-                        Text(" mL")  // Added space inside the text itself
+                        Text(" mL")
                             .font(.title3)
                             .foregroundStyle(.secondary)
                         
@@ -112,7 +112,6 @@ struct SettingsView: View {
                                 .tag(style)
                         }
                     }
-
                     .onChange(of: selectedNotificationStyle) { oldValue, newValue in
                         notificationStyleRaw = newValue.rawValue
                         Task {
@@ -214,6 +213,7 @@ struct SettingsView: View {
                     Text("About")
                 }
             }
+            .scrollIndicators(.hidden)
             .safeAreaInset(edge: .top) {
                 Color.clear.frame(height: 8)
             }
@@ -332,7 +332,7 @@ struct ContainerIconView: View {
                let uiImage = Container.loadImage(filename: imageName) {
                 Image(uiImage: uiImage)
                     .resizable()
-                    .scaledToFit()  // Changed from scaledToFill
+                    .scaledToFit()
                     .frame(width: size, height: size)
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
             } else {

@@ -8,7 +8,7 @@ struct HistoryView: View {
     @AppStorage("containers") private var containersJSON = Container.defaults.toJSON()
     
     @State private var selectedMonth = Date()
-    @State private var selectedDate: Date? = Calendar.current.startOfDay(for: Date())  // Open with today selected
+    @State private var selectedDate: Date? = Calendar.current.startOfDay(for: Date())
     
     private let calendar = Calendar.current
     private let daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -27,8 +27,8 @@ struct HistoryView: View {
                         goal: dailyGoalML
                     )
                     .padding(.horizontal)
-                    .padding(.top, 30)  // More space from top
-                    .padding(.bottom, 20)  // More space before calendar
+                    .padding(.top, 30)
+                    .padding(.bottom, 20)
                     
                     // Month selector
                     HStack {
@@ -114,6 +114,7 @@ struct HistoryView: View {
                     Spacer(minLength: 50)
                 }
             }
+            .scrollIndicators(.hidden)
         }
     }
     

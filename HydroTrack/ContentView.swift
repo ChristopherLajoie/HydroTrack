@@ -12,8 +12,9 @@ struct ContentView: View {
     // State for water animation trigger
     @State private var waterAddedTrigger = 0
     
-    // State for history expansion
-    @State private var isHistoryExpanded = false
+    // State for fraction selector
+    @State private var selectedContainer: Container?
+    @State private var showFractionSheet = false
     
     // Dynamic goal from AppStorage
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
@@ -55,6 +56,9 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    Spacer()
+                        .frame(height: 20)
+                    
                     // Water Glass with Enhanced Physics
                     EnhancedWaterGlassView(
                         progress: progress,
@@ -63,15 +67,14 @@ struct ContentView: View {
                         percentage: percentageValue,
                         waterAddedTrigger: waterAddedTrigger
                     )
-                    .frame(height: 300)
-                    .padding(.top, 30)
+                    .frame(height: 450)
                     
                     // Container quick-add buttons
                     if containers.isEmpty {
                         Text("Add containers in Settings")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .padding(.top, 10)
+                            .padding(.top, 20)
                     } else {
                         LazyVGrid(columns: [
                             GridItem(.flexible()),
@@ -79,79 +82,32 @@ struct ContentView: View {
                             GridItem(.flexible())
                         ], spacing: 16) {
                             ForEach(containers.prefix(6)) { container in
-                                ContainerButton(container: container, action: addWater)
+                                ContainerButton(container: container) {
+                                    selectedContainer = container
+                                    showFractionSheet = true
+                                }
                             }
                         }
                         .padding(.horizontal)
-                        .padding(.top, 10)
-                    }
-                    
-                    // Today's History Section
-                    if !todayEntries.isEmpty {
-                        VStack(spacing: 0) {
-                            // Header
-                            Button(action: {
-                                withAnimation(.spring(response: 0.3)) {
-                                    isHistoryExpanded.toggle()
-                                }
-                            }) {
-                                HStack {
-                                    Image(systemName: "clock.arrow.circlepath")
-                                        .font(.headline)
-                                        .foregroundStyle(.blue)
-                                    
-                                    Text("Today's Drinks")
-                                        .font(.headline)
-                                    
-                                    Spacer()
-                                    
-                                    Text("\(todayEntries.count)")
-                                        .font(.subheadline.bold())
-                                        .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(.gray.opacity(0.1))
-                                        .clipShape(Capsule())
-                                    
-                                    Image(systemName: isHistoryExpanded ? "chevron.up" : "chevron.down")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding()
-                                .background(.ultraThinMaterial)
-                            }
-                            .buttonStyle(.plain)
-                            
-                            // Expandable List
-                            if isHistoryExpanded {
-                                ForEach(todayEntries) { entry in
-                                    TodayEntryRow(
-                                        entry: entry,
-                                        container: findContainer(for: entry),
-                                        onDelete: { deleteEntry(entry) }
-                                    )
-                                    
-                                    if entry.id != todayEntries.last?.id {
-                                        Divider()
-                                            .padding(.leading, 60)
-                                    }
-                                }
-                                .transition(.asymmetric(
-                                    insertion: .push(from: .top).combined(with: .opacity),
-                                    removal: .opacity
-                                ))
-                            }
-                        }
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: .black.opacity(0.1), radius: 10, y: 5)
-                        .padding(.horizontal)
-                        .padding(.top, 10)
                     }
                     
                     Spacer()
+                        .frame(height: 60)
                 }
-                .padding(.top, 20)
+            }
+            .scrollIndicators(.hidden)
+            .sheet(isPresented: $showFractionSheet) {
+                if let container = selectedContainer {
+                    FractionSelectorView(
+                        container: container,
+                        onSelect: { fraction in
+                            addWater(container: container, fraction: fraction)
+                            showFractionSheet = false
+                        }
+                    )
+                    .presentationDetents([.height(400)])
+                    .presentationDragIndicator(.visible)
+                }
             }
             .overlay(
                 // Celebration overlay
@@ -181,14 +137,10 @@ struct ContentView: View {
         }
     }
     
-    // Find container that matches entry volume (best guess)
-    private func findContainer(for entry: WaterEntry) -> Container? {
-        containers.first { $0.volumeML == entry.amountML }
-    }
-    
     // Function to add water entry with haptics & celebration
-    private func addWater(amount: Int) {
+    private func addWater(container: Container, fraction: Double) {
         let oldProgress = progress
+        let amount = Int(Double(container.volumeML) * fraction)
         
         // Add entry
         let entry = WaterEntry(timestamp: Date(), amountML: amount)
@@ -214,111 +166,70 @@ struct ContentView: View {
             }
         }
     }
-    
-    // Function to delete a single entry
-    private func deleteEntry(_ entry: WaterEntry) {
-        withAnimation {
-            modelContext.delete(entry)
-            HapticManager.shared.impact(style: .medium)
-        }
-    }
 }
 
-// MARK: - Today Entry Row Component
-struct TodayEntryRow: View {
-    let entry: WaterEntry
-    let container: Container?
-    let onDelete: () -> Void
+// MARK: - Fraction Selector View
+struct FractionSelectorView: View {
+    let container: Container
+    let onSelect: (Double) -> Void
     
-    @State private var showDeleteConfirmation = false
-    
-    private var timeString: String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: entry.timestamp)
-    }
-    
-    private var relativeTimeString: String {
-        let interval = Date().timeIntervalSince(entry.timestamp)
-        
-        if interval < 60 {
-            return "Just now"
-        } else if interval < 3600 {
-            let minutes = Int(interval / 60)
-            return "\(minutes)m ago"
-        } else {
-            let hours = Int(interval / 3600)
-            return "\(hours)h ago"
-        }
-    }
+    let fractions: [(name: String, value: Double)] = [
+        ("1/4", 0.25),
+        ("1/3", 0.33),
+        ("1/2", 0.5),
+        ("2/3", 0.67),
+        ("3/4", 0.75),
+        ("Full", 1.0)
+    ]
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Container photo or emoji or default icon
-            if let container = container {
-                ContainerIconView(container: container, size: 36)
-            } else {
-                Image(systemName: "drop.fill")
-                    .font(.title2)
-                    .foregroundStyle(.blue)
-                    .frame(width: 36, height: 36)
-            }
-            
-            // Entry details
-            VStack(alignment: .leading, spacing: 4) {
-                if let container = container {
-                    Text(container.name)
-                        .font(.headline)
-                } else {
-                    Text("Custom Amount")
-                        .font(.headline)
-                }
+        VStack(spacing: 20) {
+            // Header
+            VStack(spacing: 8) {
+                ContainerIconView(container: container, size: 60)
                 
-                HStack(spacing: 8) {
-                    Text("\(entry.amountML) mL")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    
-                    Text("•")
-                        .foregroundStyle(.secondary)
-                    
-                    Text(relativeTimeString)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Text(container.name)
+                    .font(.title2.bold())
+                
+                Text("\(container.volumeML) mL")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 20)
+            
+            Divider()
+            
+            // Fraction buttons
+            VStack(spacing: 12) {
+                ForEach(fractions, id: \.name) { fraction in
+                    Button(action: {
+                        onSelect(fraction.value)
+                    }) {
+                        HStack {
+                            Text(fraction.name)
+                                .font(.headline)
+                            
+                            Spacer()
+                            
+                            Text("\(Int(Double(container.volumeML) * fraction.value)) mL")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding()
+                        .background(.blue.opacity(0.1))
+                        .foregroundStyle(.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal)
             
             Spacer()
-            
-            // Time
-            Text(timeString)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            
-            // Delete button
-            Button(action: {
-                showDeleteConfirmation = true
-            }) {
-                Image(systemName: "minus.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.red)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 16)
-        .contentShape(Rectangle())
-        .alert("Delete Entry?", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                onDelete()
-            }
-        } message: {
-            if let container = container {
-                Text("Remove \(container.name) (\(entry.amountML) mL) from today's total?")
-            } else {
-                Text("Remove \(entry.amountML) mL from today's total?")
-            }
         }
     }
 }
@@ -326,10 +237,10 @@ struct TodayEntryRow: View {
 // MARK: - Container Button Component
 struct ContainerButton: View {
     let container: Container
-    let action: (Int) -> Void
+    let action: () -> Void
     
     var body: some View {
-        Button(action: { action(container.volumeML) }) {
+        Button(action: action) {
             VStack(spacing: 8) {
                 ContainerIconView(container: container, size: 44)
                 
@@ -366,7 +277,7 @@ struct EnhancedWaterGlassView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            let width = min(geometry.size.width * 0.65, 220)
+            let width = min(geometry.size.width * 0.65, 250)
             let height = geometry.size.height * 0.85
             let waterHeight = height * CGFloat(min(max(progress, 0.05), 1.0))
             
@@ -458,12 +369,12 @@ struct EnhancedWaterGlassView: View {
                 // 4. Text Overlay
                 VStack(spacing: 4) {
                     Text("\(percentage)%")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
                         .foregroundStyle(progress > 0.5 ? .white : .blue)
                         .shadow(color: .black.opacity(progress > 0.5 ? 0.2 : 0), radius: 2)
                     
                     Text("\(currentAmount) / \(goalAmount) mL")
-                        .font(.caption)
+                        .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundStyle(progress > 0.5 ? .white.opacity(0.8) : .secondary)
                 }

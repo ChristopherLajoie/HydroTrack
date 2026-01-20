@@ -38,15 +38,15 @@ struct SettingsView: View {
             Form {
                 // Daily Goal Section
                 Section {
-                    HStack {
+                    HStack(spacing: 0) {
                         TextField("Goal", value: $dailyGoalML, format: .number)
                             .keyboardType(.numberPad)
                             .font(.title2.bold())
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: 100)
+                            .multilineTextAlignment(.trailing)  // Changed from .leading to .trailing
+                            .fixedSize()  // Added this - makes it only as wide as needed
                             .focused($isGoalFieldFocused)
                         
-                        Text("mL")
+                        Text(" mL")  // Added space inside the text itself
                             .font(.title3)
                             .foregroundStyle(.secondary)
                         
@@ -108,17 +108,11 @@ struct SettingsView: View {
                 Section {
                     Picker("Notification Style", selection: $selectedNotificationStyle) {
                         ForEach(NotificationStyle.allCases) { style in
-                            HStack {
-                                Text(style.rawValue)
-                                if style == .smart {
-                                    Image(systemName: "sparkles")
-                                        .font(.caption)
-                                        .foregroundStyle(.yellow)
-                                }
-                            }
-                            .tag(style)
+                            Text(style.rawValue)
+                                .tag(style)
                         }
                     }
+
                     .onChange(of: selectedNotificationStyle) { oldValue, newValue in
                         notificationStyleRaw = newValue.rawValue
                         Task {

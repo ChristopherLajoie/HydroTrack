@@ -9,6 +9,7 @@ enum NotificationStyle: String, CaseIterable, Identifiable {
 }
 
 struct SettingsView: View {
+    @AppStorage("trainingDayGoalML") private var trainingDayGoalML = 3000
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
     @AppStorage("notificationStyle") private var notificationStyleRaw = NotificationStyle.off.rawValue
     
@@ -36,33 +37,34 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                // Daily Goal Section
+                // Replace your Daily Goal section with this merged version:
+
                 Section {
-                    HStack(spacing: 0) {
-                        TextField("Goal", value: $dailyGoalML, format: .number)
-                            .keyboardType(.numberPad)
-                            .font(.title2.bold())
-                            .multilineTextAlignment(.trailing)
-                            .fixedSize()
-                            .focused($isGoalFieldFocused)
-                        
-                        Text(" mL")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                        
+                    HStack {
+                        Text("Daily Goal")
                         Spacer()
-                        
-                        Image(systemName: "target")
-                            .font(.title2)
-                            .foregroundStyle(.blue)
+                        TextField("mL", value: $dailyGoalML, format: .number)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 100)
+                        Text("mL")
                     }
-                    .padding(.vertical, 8)
+                    
+                    HStack {
+                        HStack(spacing: 8) {
+                            Text("Training Day Goal")
+                        }
+                        Spacer()
+                        TextField("mL", value: $trainingDayGoalML, format: .number)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 100)
+                        Text("mL")
+                    }
                 } header: {
-                    Text("Daily Goal")
-                } footer: {
-                    Text("Recommended: 2000-3000 mL for adults")
+                    Text("Hydration Goals")
                 }
-                
+
                 // Container Management Section
                 Section {
                     ForEach(containers) { container in

@@ -1,65 +1,95 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Portion Type
+enum ContainerPortion: CaseIterable, Identifiable {
+    case quarter, third, half, twoThirds, threeQuarters, full
+
+    var id: String { label }
+
+    var numerator: Int {
+        switch self {
+        case .quarter: 1
+        case .third: 1
+        case .half: 1
+        case .twoThirds: 2
+        case .threeQuarters: 3
+        case .full: 1
+        }
+    }
+
+    var denominator: Int {
+        switch self {
+        case .quarter: 4
+        case .third: 3
+        case .half: 2
+        case .twoThirds: 3
+        case .threeQuarters: 4
+        case .full: 1
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .quarter: "1/4"
+        case .third: "1/3"
+        case .half: "1/2"
+        case .twoThirds: "2/3"
+        case .threeQuarters: "3/4"
+        case .full: "Full"
+        }
+    }
+
+    var value: Double {
+        Double(numerator) / Double(denominator)
+    }
+}
+
+// MARK: - ContentView
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var allEntries: [WaterEntry]
-    
-    // State for celebration
+
     @State private var confettiCounter = 0
-    @State private var previousProgress: Double = 0
-    
-    // State for water animation trigger
     @State private var waterAddedTrigger = 0
-    
-    // State for fraction selector
+
+    // Fraction sheet
     @State private var selectedContainer: Container?
-    @State private var showFractionSheet = false
-    
-    // Dynamic goal from AppStorage
+
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
-    
-    // Containers from AppStorage
     @AppStorage("containers") private var containersJSON = Container.defaults.toJSON()
-    
+
     private var containers: [Container] {
         Array<Container>.fromJSON(containersJSON)
     }
-    
-    // Calculate today's entries
+
     private var todayEntries: [WaterEntry] {
         let today = Calendar.current.startOfDay(for: Date())
-        return allEntries.filter { entry in
-            Calendar.current.isDate(entry.timestamp, inSameDayAs: today)
-        }
-        .sorted { $0.timestamp > $1.timestamp } // Most recent first
+        return allEntries
+            .filter { Calendar.current.isDate($0.timestamp, inSameDayAs: today) }
+            .sorted { $0.timestamp > $1.timestamp }
     }
-    
-    // Calculate today's total
+
     private var todayTotal: Int {
         todayEntries.reduce(0) { $0 + $1.amountML }
     }
-    
-    // Calculate progress for visual (capped at 1.0)
+
     private var progress: Double {
         let ratio = Double(todayTotal) / Double(dailyGoalML)
         return min(ratio, 1.0)
     }
-    
-    // Calculate actual percentage (can go above 100%)
+
     private var percentageValue: Int {
         let ratio = Double(todayTotal) / Double(dailyGoalML)
         return Int(ratio * 100)
     }
-    
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
-                    Spacer()
-                        .frame(height: 20)
-                    
-                    // Water Glass with Enhanced Physics
+                VStack(spacing: 16) {
+                    Spacer().frame(height: 12)
+
                     EnhancedWaterGlassView(
                         progress: progress,
                         currentAmount: todayTotal,
@@ -67,14 +97,14 @@ struct ContentView: View {
                         percentage: percentageValue,
                         waterAddedTrigger: waterAddedTrigger
                     )
-                    .frame(height: 450)
-                    
-                    // Container quick-add buttons
+                    .frame(height: 470)
+
+                    // Quick-add buttons
                     if containers.isEmpty {
                         Text("Add containers in Settings")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .padding(.top, 20)
+                            .padding(.top, 8)
                     } else {
                         LazyVGrid(columns: [
                             GridItem(.flexible()),
@@ -84,82 +114,72 @@ struct ContentView: View {
                             ForEach(containers.prefix(6)) { container in
                                 ContainerButton(container: container) {
                                     selectedContainer = container
-                                    showFractionSheet = true
                                 }
                             }
                         }
                         .padding(.horizontal)
                     }
-                    
-                    Spacer()
-                        .frame(height: 60)
+
+                    Spacer().frame(height: 24)
                 }
             }
             .scrollIndicators(.hidden)
-            .sheet(isPresented: $showFractionSheet) {
-                if let container = selectedContainer {
-                    FractionSelectorView(
-                        container: container,
-                        onSelect: { fraction in
-                            addWater(container: container, fraction: fraction)
-                            showFractionSheet = false
+            .sheet(item: $selectedContainer) { container in
+                FractionPickerSheet(
+                    container: container,
+                    onPick: { portion in
+                        addWater(container: container, portion: portion)
+                        selectedContainer = nil
+                    },
+                    onCancel: {
+                        selectedContainer = nil
+                    }
+                )
+            }
+            .overlay {
+                if progress >= 1.0 {
+                    ZStack {
+                        Color.black.opacity(0.3).ignoresSafeArea()
+                        VStack(spacing: 20) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 100))
+                                .foregroundStyle(.green)
+                                .scaleEffect(confettiCounter > 0 ? 1.0 : 0.5)
+                                .animation(.spring(response: 0.5, dampingFraction: 0.6), value: confettiCounter)
+
+                            Text("Goal Reached! 🎉")
+                                .font(.title.bold())
+                                .foregroundStyle(.white)
                         }
-                    )
-                    .presentationDetents([.height(400)])
-                    .presentationDragIndicator(.visible)
+                    }
+                    .opacity(confettiCounter > 0 && confettiCounter < 2 ? 1.0 : 0.0)
+                    .animation(.easeInOut(duration: 0.3), value: confettiCounter)
                 }
             }
-            .overlay(
-                // Celebration overlay
-                Group {
-                    if progress >= 1.0 {
-                        ZStack {
-                            Color.black.opacity(0.3)
-                                .ignoresSafeArea()
-                            
-                            VStack(spacing: 20) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 100))
-                                    .foregroundStyle(.green)
-                                    .scaleEffect(confettiCounter > 0 ? 1.0 : 0.5)
-                                    .animation(.spring(response: 0.5, dampingFraction: 0.6), value: confettiCounter)
-                                
-                                Text("Goal Reached! 🎉")
-                                    .font(.title.bold())
-                                    .foregroundStyle(.white)
-                            }
-                        }
-                        .opacity(confettiCounter > 0 && confettiCounter < 2 ? 1.0 : 0.0)
-                        .animation(.easeInOut(duration: 0.3), value: confettiCounter)
-                    }
-                }
-            )
         }
     }
-    
-    // Function to add water entry with haptics & celebration
-    private func addWater(container: Container, fraction: Double) {
+
+    private func addWater(container: Container, portion: ContainerPortion) {
         let oldProgress = progress
-        let amount = Int(Double(container.volumeML) * fraction)
-        
-        // Add entry
-        let entry = WaterEntry(timestamp: Date(), amountML: amount)
+
+        let ml = Int(round(Double(container.volumeML) * portion.value))
+
+        let entry = WaterEntry(
+            timestamp: Date(),
+            amountML: ml,
+            containerID: container.id,
+            fractionNumerator: portion.numerator,
+            fractionDenominator: portion.denominator
+        )
         modelContext.insert(entry)
-        
-        // Trigger water animation
+
         waterAddedTrigger += 1
-        
-        // Light haptic feedback for button tap
         HapticManager.shared.impact(style: .light)
-        
-        // Check if goal was just reached
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if oldProgress < 1.0 && progress >= 1.0 {
-                // Goal reached! Success haptic + celebration
                 HapticManager.shared.notification(type: .success)
                 confettiCounter = 1
-                
-                // Auto-dismiss after 2 seconds
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     confettiCounter = 2
                 }
@@ -168,86 +188,83 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Fraction Selector View
-struct FractionSelectorView: View {
+// MARK: - Fraction Sheet (FIXED UI)
+struct FractionPickerSheet: View {
     let container: Container
-    let onSelect: (Double) -> Void
-    
-    let fractions: [(name: String, value: Double)] = [
-        ("1/4", 0.25),
-        ("1/3", 0.33),
-        ("1/2", 0.5),
-        ("2/3", 0.67),
-        ("3/4", 0.75),
-        ("Full", 1.0)
-    ]
-    
+    let onPick: (ContainerPortion) -> Void
+    let onCancel: () -> Void
+
+    private func ml(for portion: ContainerPortion) -> Int {
+        Int(round(Double(container.volumeML) * portion.value))
+    }
+
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            VStack(spacing: 8) {
-                ContainerIconView(container: container, size: 60)
-                
-                Text(container.name)
-                    .font(.title2.bold())
-                
-                Text("\(container.volumeML) mL")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.top, 20)
-            
-            Divider()
-            
-            // Fraction buttons
-            VStack(spacing: 12) {
-                ForEach(fractions, id: \.name) { fraction in
-                    Button(action: {
-                        onSelect(fraction.value)
-                    }) {
-                        HStack {
-                            Text(fraction.name)
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 12) {
+                        ContainerIconView(container: container, size: 56)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(container.name)
                                 .font(.headline)
-                            
-                            Spacer()
-                            
-                            Text("\(Int(Double(container.volumeML) * fraction.value)) mL")
+                            Text("\(container.volumeML) mL")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
-                        .padding()
-                        .background(.blue.opacity(0.1))
-                        .foregroundStyle(.blue)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                        Spacer()
                     }
-                    .buttonStyle(.plain)
+                    .padding(.vertical, 6)
+                }
+
+                Section("Log amount") {
+                    ForEach(ContainerPortion.allCases) { portion in
+                        Button {
+                            onPick(portion)
+                        } label: {
+                            HStack {
+                                Text(portion.label)
+                                    .font(.headline)
+
+                                Spacer()
+
+                                Text("\(ml(for: portion)) mL")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
-            .padding(.horizontal)
-            
-            Spacer()
+            .scrollIndicators(.hidden)
+            .navigationTitle("Add drink")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 }
 
-// MARK: - Container Button Component
+// MARK: - Container Button
 struct ContainerButton: View {
     let container: Container
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 8) {
                 ContainerIconView(container: container, size: 44)
-                
+
                 Text(container.name)
                     .font(.caption.bold())
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
+
                 Text("\(container.volumeML) mL")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -269,20 +286,19 @@ struct EnhancedWaterGlassView: View {
     let goalAmount: Int
     let percentage: Int
     let waterAddedTrigger: Int
-    
+
     @State private var wavePhase: Double = 0
     @State private var bubbles: [BubbleParticle] = []
-    
+
     let glassThickness: CGFloat = 4
-    
+
     var body: some View {
         GeometryReader { geometry in
             let width = min(geometry.size.width * 0.65, 250)
             let height = geometry.size.height * 0.85
             let waterHeight = height * CGFloat(min(max(progress, 0.05), 1.0))
-            
+
             ZStack {
-                // 1. Back of Glass (Translucent)
                 GlassShape()
                     .fill(
                         LinearGradient(
@@ -292,8 +308,7 @@ struct EnhancedWaterGlassView: View {
                         )
                     )
                     .frame(width: width, height: height)
-                
-                // 2. Water Body
+
                 ZStack(alignment: .bottom) {
                     WaterWaveShape(progress: progress, phase: wavePhase)
                         .fill(
@@ -313,8 +328,8 @@ struct EnhancedWaterGlassView: View {
                         )
                         .frame(width: width - glassThickness * 2, height: height - glassThickness)
                         .mask(GlassShape().padding(glassThickness))
-                    
-                    TimelineView(.animation) { timeline in
+
+                    TimelineView(.animation) { _ in
                         Canvas { context, size in
                             for bubble in bubbles {
                                 let rect = CGRect(
@@ -332,7 +347,6 @@ struct EnhancedWaterGlassView: View {
                     .mask(GlassShape().padding(glassThickness))
                 }
 
-                // 3. Front Glass Glare
                 GlassShape()
                     .stroke(
                         LinearGradient(
@@ -348,7 +362,7 @@ struct EnhancedWaterGlassView: View {
                         lineWidth: 2
                     )
                     .frame(width: width, height: height)
-                
+
                 Path { path in
                     path.move(to: CGPoint(x: width * 0.2, y: height * 0.1))
                     path.addQuadCurve(
@@ -366,13 +380,12 @@ struct EnhancedWaterGlassView: View {
                 )
                 .frame(width: width, height: height)
 
-                // 4. Text Overlay
                 VStack(spacing: 4) {
                     Text("\(percentage)%")
                         .font(.system(size: 48, weight: .bold, design: .rounded))
                         .foregroundStyle(progress > 0.5 ? .white : .blue)
                         .shadow(color: .black.opacity(progress > 0.5 ? 0.2 : 0), radius: 2)
-                    
+
                     Text("\(currentAmount) / \(goalAmount) mL")
                         .font(.subheadline)
                         .fontWeight(.semibold)
@@ -381,39 +394,29 @@ struct EnhancedWaterGlassView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        .onAppear {
-            startWaveAnimation()
-        }
-        .onChange(of: waterAddedTrigger) { _, _ in
-            spawnBubbles()
-        }
+        .onAppear { startWaveAnimation() }
+        .onChange(of: waterAddedTrigger) { _, _ in spawnBubbles() }
     }
-    
+
     private func startWaveAnimation() {
         Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
             wavePhase += 0.02
         }
     }
-    
+
     private func spawnBubbles() {
-        for _ in 0..<15 {
-            bubbles.append(BubbleParticle())
-        }
-        
+        for _ in 0..<15 { bubbles.append(BubbleParticle()) }
+
         Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
             if bubbles.isEmpty { timer.invalidate() }
-            
-            var activeBubbles: [BubbleParticle] = []
-            
-            for var bubble in bubbles {
-                bubble.y += bubble.speed
-                bubble.x += sin(bubble.y * 10) * 0.005
-                
-                if bubble.y < 1.0 {
-                    activeBubbles.append(bubble)
-                }
+
+            var active: [BubbleParticle] = []
+            for var b in bubbles {
+                b.y += b.speed
+                b.x += sin(b.y * 10) * 0.005
+                if b.y < 1.0 { active.append(b) }
             }
-            bubbles = activeBubbles
+            bubbles = active
         }
     }
 }
@@ -424,7 +427,7 @@ struct GlassShape: Shape {
         var path = Path()
         let bottomWidth = rect.width * 0.75
         let taper = (rect.width - bottomWidth) / 2
-        
+
         path.move(to: CGPoint(x: 0, y: 0))
         path.addLine(to: CGPoint(x: taper, y: rect.height - 15))
         path.addQuadCurve(
@@ -437,7 +440,6 @@ struct GlassShape: Shape {
             control: CGPoint(x: rect.width - taper, y: rect.height)
         )
         path.addLine(to: CGPoint(x: rect.width, y: 0))
-        
         return path
     }
 }
@@ -445,37 +447,36 @@ struct GlassShape: Shape {
 struct WaterWaveShape: Shape {
     var progress: Double
     var phase: Double
-    
+
     var animatableData: Double {
         get { phase }
         set { phase = newValue }
     }
-    
+
     func path(in rect: CGRect) -> Path {
         var path = Path()
         let width = rect.width
         let height = rect.height
-        
+
         let waterHeight = height * CGFloat(progress)
         let topY = height - waterHeight
-        
+
         path.move(to: CGPoint(x: 0, y: height))
         path.addLine(to: CGPoint(x: width, y: height))
         path.addLine(to: CGPoint(x: width, y: topY))
-        
+
         if progress > 0 && progress < 1.0 {
             for x in stride(from: width, through: 0, by: -2) {
                 let relativeX = x / width
                 let sine1 = sin(relativeX * 4 * .pi + phase) * 4
                 let sine2 = sin(relativeX * 6 * .pi + phase * 1.5) * 2
-                
                 let y = topY + sine1 + sine2
                 path.addLine(to: CGPoint(x: x, y: y))
             }
         } else {
             path.addLine(to: CGPoint(x: 0, y: topY))
         }
-        
+
         path.closeSubpath()
         return path
     }

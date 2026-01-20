@@ -313,24 +313,23 @@ struct DayDetailView: View {
     let goal: Int
     let containers: [Container]
     let onDelete: (WaterEntry) -> Void
-    
+
     private var dateString: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, MMMM d, yyyy"
         return formatter.string(from: date)
     }
-    
+
     private var total: Int {
         entries.reduce(0) { $0 + $1.amountML }
     }
-    
+
     private var progress: Double {
         Double(total) / Double(goal)
     }
-    
+
     var body: some View {
         VStack(spacing: 12) {
-            // Header
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(dateString)
@@ -339,17 +338,16 @@ struct DayDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                
+
                 Spacer()
-                
+
                 Image(systemName: progress >= 1.0 ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
                     .foregroundStyle(progress >= 1.0 ? .green : .secondary)
             }
-            
+
             Divider()
-            
-            // Entries
+
             if entries.isEmpty {
                 Text("No entries for this day")
                     .font(.subheadline)
@@ -360,27 +358,24 @@ struct DayDetailView: View {
                     HStack(spacing: 12) {
                         Text(timeString(entry.timestamp))
                             .font(.subheadline)
-                            .frame(width: 80, alignment: .leading)
-                        
-                        if let container = findContainer(for: entry) {
-                            ContainerIconView(container: container, size: 24)
-                            
-                            Text(container.name)
+                            .frame(width: 90, alignment: .leading)
+
+                        if let display = displayForEntry(entry) {
+                            ContainerIconView(container: display.container, size: 24)
+
+                            Text(display.text)
                                 .font(.subheadline)
                         } else {
-                            Image(systemName: "circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.blue)
-                            
-                            Text("\(entry.amountML) mL")
+                            Text("Custom")
                                 .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
-                        
+
                         Spacer()
-                        
-                        Button(action: {
+
+                        Button {
                             onDelete(entry)
-                        }) {
+                        } label: {
                             Image(systemName: "minus.circle.fill")
                                 .foregroundStyle(.red)
                         }
@@ -394,15 +389,33 @@ struct DayDetailView: View {
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
-    
+
     private func timeString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         return formatter.string(from: date)
     }
-    
-    private func findContainer(for entry: WaterEntry) -> Container? {
-        containers.first { $0.volumeML == entry.amountML }
+
+    private func displayForEntry(_ entry: WaterEntry) -> (container: Container, text: String)? {
+        // 1) New entries (fraction logging): use containerID
+        if let cid = entry.containerID,
+           let container = containers.first(where: { $0.id == cid }) {
+
+            if let n = entry.fractionNumerator, let d = entry.fractionDenominator {
+                let label = (n == 1 && d == 1) ? "Full" : "\(n)/\(d)"
+                return (container, "\(container.name) • \(label)")
+            } else {
+                // Full container but no fraction stored (still show container)
+                return (container, container.name)
+            }
+        }
+
+        // 2) Backward compatibility for old entries: try match by full volume
+        if let container = containers.first(where: { $0.volumeML == entry.amountML }) {
+            return (container, "\(container.name) • Full")
+        }
+
+        return nil
     }
 }
 

@@ -9,11 +9,11 @@ struct ContentView: View {
     @State private var confettiCounter = 0
     @State private var previousProgress: Double = 0
     
-    // State for reset alert
-    @State private var showResetAlert = false
-    
     // State for water animation trigger
     @State private var waterAddedTrigger = 0
+    
+    // State for history expansion
+    @State private var isHistoryExpanded = false
     
     // Dynamic goal from AppStorage
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
@@ -25,13 +25,18 @@ struct ContentView: View {
         Array<Container>.fromJSON(containersJSON)
     }
     
-    // Calculate today's total
-    private var todayTotal: Int {
+    // Calculate today's entries
+    private var todayEntries: [WaterEntry] {
         let today = Calendar.current.startOfDay(for: Date())
-        let todayEntries = allEntries.filter { entry in
+        return allEntries.filter { entry in
             Calendar.current.isDate(entry.timestamp, inSameDayAs: today)
         }
-        return todayEntries.reduce(0) { $0 + $1.amountML }
+        .sorted { $0.timestamp > $1.timestamp } // Most recent first
+    }
+    
+    // Calculate today's total
+    private var todayTotal: Int {
+        todayEntries.reduce(0) { $0 + $1.amountML }
     }
     
     // Calculate progress for visual (capped at 1.0)
@@ -81,29 +86,73 @@ struct ContentView: View {
                         .padding(.top, 10)
                     }
                     
-                    // Reset button
-                    Button(action: {
-                        showResetAlert = true
-                    }) {
-                        HStack {
-                            Image(systemName: "arrow.counterclockwise")
-                            Text("Reset Today")
+                    // Today's History Section
+                    if !todayEntries.isEmpty {
+                        VStack(spacing: 0) {
+                            // Header
+                            Button(action: {
+                                withAnimation(.spring(response: 0.3)) {
+                                    isHistoryExpanded.toggle()
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .font(.headline)
+                                        .foregroundStyle(.blue)
+                                    
+                                    Text("Today's Drinks")
+                                        .font(.headline)
+                                    
+                                    Spacer()
+                                    
+                                    Text("\(todayEntries.count)")
+                                        .font(.subheadline.bold())
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(.gray.opacity(0.1))
+                                        .clipShape(Capsule())
+                                    
+                                    Image(systemName: isHistoryExpanded ? "chevron.up" : "chevron.down")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding()
+                                .background(.ultraThinMaterial)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            // Expandable List
+                            if isHistoryExpanded {
+                                ForEach(todayEntries) { entry in
+                                    TodayEntryRow(
+                                        entry: entry,
+                                        container: findContainer(for: entry),
+                                        onDelete: { deleteEntry(entry) }
+                                    )
+                                    
+                                    if entry.id != todayEntries.last?.id {
+                                        Divider()
+                                            .padding(.leading, 60)
+                                    }
+                                }
+                                .transition(.asymmetric(
+                                    insertion: .push(from: .top).combined(with: .opacity),
+                                    removal: .opacity
+                                ))
+                            }
                         }
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(.red.opacity(0.1))
-                        .foregroundStyle(.red)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: .black.opacity(0.1), radius: 10, y: 5)
+                        .padding(.horizontal)
+                        .padding(.top, 10)
                     }
-                    .padding(.horizontal)
-                    .padding(.top, 20)
                     
                     Spacer()
                 }
                 .padding(.top, 20)
             }
-            .dismissKeyboardOnTap()
             .overlay(
                 // Celebration overlay
                 Group {
@@ -129,15 +178,12 @@ struct ContentView: View {
                     }
                 }
             )
-            .alert("Reset Today's Data?", isPresented: $showResetAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Reset", role: .destructive) {
-                    resetTodayData()
-                }
-            } message: {
-                Text("This will delete all water entries for today. This action cannot be undone.")
-            }
         }
+    }
+    
+    // Find container that matches entry volume (best guess)
+    private func findContainer(for entry: WaterEntry) -> Container? {
+        containers.first { $0.volumeML == entry.amountML }
     }
     
     // Function to add water entry with haptics & celebration
@@ -169,21 +215,111 @@ struct ContentView: View {
         }
     }
     
-    // Function to reset today's data
-    private func resetTodayData() {
-        let today = Calendar.current.startOfDay(for: Date())
-        let todayEntries = allEntries.filter { entry in
-            Calendar.current.isDate(entry.timestamp, inSameDayAs: today)
-        }
-        
-        for entry in todayEntries {
+    // Function to delete a single entry
+    private func deleteEntry(_ entry: WaterEntry) {
+        withAnimation {
             modelContext.delete(entry)
+            HapticManager.shared.impact(style: .medium)
         }
+    }
+}
+
+// MARK: - Today Entry Row Component
+struct TodayEntryRow: View {
+    let entry: WaterEntry
+    let container: Container?
+    let onDelete: () -> Void
+    
+    @State private var showDeleteConfirmation = false
+    
+    private var timeString: String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: entry.timestamp)
+    }
+    
+    private var relativeTimeString: String {
+        let interval = Date().timeIntervalSince(entry.timestamp)
         
-        // Reset celebration counter
-        confettiCounter = 0
-        
-        HapticManager.shared.impact(style: .medium)
+        if interval < 60 {
+            return "Just now"
+        } else if interval < 3600 {
+            let minutes = Int(interval / 60)
+            return "\(minutes)m ago"
+        } else {
+            let hours = Int(interval / 3600)
+            return "\(hours)h ago"
+        }
+    }
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Container photo or emoji or default icon
+            if let container = container {
+                ContainerIconView(container: container, size: 36)
+            } else {
+                Image(systemName: "drop.fill")
+                    .font(.title2)
+                    .foregroundStyle(.blue)
+                    .frame(width: 36, height: 36)
+            }
+            
+            // Entry details
+            VStack(alignment: .leading, spacing: 4) {
+                if let container = container {
+                    Text(container.name)
+                        .font(.headline)
+                } else {
+                    Text("Custom Amount")
+                        .font(.headline)
+                }
+                
+                HStack(spacing: 8) {
+                    Text("\(entry.amountML) mL")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    
+                    Text("•")
+                        .foregroundStyle(.secondary)
+                    
+                    Text(relativeTimeString)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            // Time
+            Text(timeString)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            // Delete button
+            Button(action: {
+                showDeleteConfirmation = true
+            }) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .contentShape(Rectangle())
+        .alert("Delete Entry?", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                onDelete()
+            }
+        } message: {
+            if let container = container {
+                Text("Remove \(container.name) (\(entry.amountML) mL) from today's total?")
+            } else {
+                Text("Remove \(entry.amountML) mL from today's total?")
+            }
+        }
     }
 }
 
@@ -195,8 +331,8 @@ struct ContainerButton: View {
     var body: some View {
         Button(action: { action(container.volumeML) }) {
             VStack(spacing: 8) {
-                Text(container.emoji)
-                    .font(.system(size: 32))
+                ContainerIconView(container: container, size: 44)
+                
                 Text(container.name)
                     .font(.caption.bold())
                     .lineLimit(1)

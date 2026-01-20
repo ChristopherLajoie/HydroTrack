@@ -1,20 +1,37 @@
 import SwiftUI
 
+enum NotificationStyle: String, CaseIterable, Identifiable {
+    case off = "Off"
+    case periodic = "Periodic"
+    case smart = "Smart"
+    
+    var id: String { rawValue }
+}
+
 struct SettingsView: View {
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
+    @AppStorage("notificationStyle") private var notificationStyleRaw = NotificationStyle.off.rawValue
+    
+    // Periodic settings
     @AppStorage("notifStartHour") private var notifStartHour = 9
     @AppStorage("notifEndHour") private var notifEndHour = 21
     @AppStorage("notifIntervalHours") private var notifIntervalHours = 2
-    @AppStorage("notificationsEnabled") private var notificationsEnabled = false
+    
+    // Smart notification settings
+    @AppStorage("smartNotifMilestones") private var smartNotifMilestones = true
+    @AppStorage("smartNotifInactivity") private var smartNotifInactivity = true
+    @AppStorage("smartNotifAchievement") private var smartNotifAchievement = true
+    
     @AppStorage("containers") private var containersJSON = Container.defaults.toJSON()
     
     @FocusState private var isGoalFieldFocused: Bool
     @State private var showPermissionDeniedAlert = false
     @State private var showAddContainerSheet = false
     @State private var editingContainer: Container?
-    
-    // Local state synced with AppStorage
     @State private var containers: [Container] = []
+    
+    // Local state for notification style
+    @State private var selectedNotificationStyle: NotificationStyle = .off
     
     var body: some View {
         NavigationStack {
@@ -41,17 +58,16 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 8)
                 } header: {
-                    Text("Hydration Goal")
+                    Text("Daily Goal")
                 } footer: {
-                    Text("Recommended: 2000-3000 mL per day for most adults")
+                    Text("Recommended: 2000-3000 mL for adults")
                 }
                 
                 // Container Management Section
                 Section {
                     ForEach(containers) { container in
                         HStack {
-                            Text(container.emoji)
-                                .font(.title2)
+                            ContainerIconView(container: container, size: 36)
                             
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(container.name)
@@ -85,25 +101,33 @@ struct SettingsView: View {
                 } header: {
                     Text("Containers")
                 } footer: {
-                    Text("Tap and hold to reorder. First 6 containers show as quick-add buttons.")
+                    Text("Tap and hold to reorder")
                 }
                 
                 // Notifications Section
                 Section {
-                    Toggle(isOn: $notificationsEnabled) {
-                        HStack {
-                            Image(systemName: "bell.fill")
-                                .foregroundStyle(.orange)
-                            Text("Enable Reminders")
+                    Picker("Notification Style", selection: $selectedNotificationStyle) {
+                        ForEach(NotificationStyle.allCases) { style in
+                            HStack {
+                                Text(style.rawValue)
+                                if style == .smart {
+                                    Image(systemName: "sparkles")
+                                        .font(.caption)
+                                        .foregroundStyle(.yellow)
+                                }
+                            }
+                            .tag(style)
                         }
                     }
-                    .onChange(of: notificationsEnabled) { oldValue, newValue in
+                    .onChange(of: selectedNotificationStyle) { oldValue, newValue in
+                        notificationStyleRaw = newValue.rawValue
                         Task {
-                            await handleNotificationToggle(enabled: newValue)
+                            await handleNotificationStyleChange(newValue)
                         }
                     }
                     
-                    if notificationsEnabled {
+                    // Periodic Settings
+                    if selectedNotificationStyle == .periodic {
                         Picker("Start Time", selection: $notifStartHour) {
                             ForEach(6..<24) { hour in
                                 Text(hourString(hour)).tag(hour)
@@ -123,11 +147,57 @@ struct SettingsView: View {
                             Text("4 hours").tag(4)
                         }
                     }
+                    
+                    // Smart Settings
+                    if selectedNotificationStyle == .smart {
+                        Toggle(isOn: $smartNotifMilestones) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Progress Milestones")
+                                    .font(.headline)
+                                Text("12pm, 3pm, 6pm, 9pm")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .onChange(of: smartNotifMilestones) { _, _ in
+                            rescheduleSmartNotifications()
+                        }
+                        
+                        Toggle(isOn: $smartNotifInactivity) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Inactivity Alerts")
+                                    .font(.headline)
+                                Text("Reminds you if inactive")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .onChange(of: smartNotifInactivity) { _, _ in
+                            rescheduleSmartNotifications()
+                        }
+                        
+                        Toggle(isOn: $smartNotifAchievement) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Achievement Reminders")
+                                    .font(.headline)
+                                Text("Motivational push to finish")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .onChange(of: smartNotifAchievement) { _, _ in
+                            rescheduleSmartNotifications()
+                        }
+                    }
                 } header: {
                     Text("Reminders")
                 } footer: {
-                    if notificationsEnabled {
-                        Text("Changes are saved automatically")
+                    if selectedNotificationStyle == .periodic {
+                        Text("Receive reminders at regular intervals during your active hours")
+                    } else if selectedNotificationStyle == .smart {
+                        Text("Reminders adapt to your progress and habits")
+                    } else {
+                        Text("No notifications will be sent")
                     }
                 }
                 
@@ -161,7 +231,8 @@ struct SettingsView: View {
                     }
                 }
                 Button("Cancel", role: .cancel) {
-                    notificationsEnabled = false
+                    selectedNotificationStyle = .off
+                    notificationStyleRaw = NotificationStyle.off.rawValue
                 }
             } message: {
                 Text("Please enable notifications in Settings to receive water reminders.")
@@ -173,28 +244,74 @@ struct SettingsView: View {
                 EditContainerView(container: container, containers: $containers)
             }
             .onAppear {
-                // Load containers from AppStorage
                 containers = Array<Container>.fromJSON(containersJSON)
+                // Load notification style from AppStorage
+                if let style = NotificationStyle(rawValue: notificationStyleRaw) {
+                    selectedNotificationStyle = style
+                }
             }
             .onChange(of: containers) { _, newValue in
-                // Save containers to AppStorage whenever they change
                 containersJSON = newValue.toJSON()
             }
-            .onDisappear {
-                if notificationsEnabled {
-                    Task {
-                        await NotificationManager.shared.scheduleWaterReminders(
-                            startHour: notifStartHour,
-                            endHour: notifEndHour,
-                            intervalHours: notifIntervalHours
-                        )
-                    }
-                }
+        }
+    }
+    
+    private func handleNotificationStyleChange(_ style: NotificationStyle) async {
+        if style == .off {
+            NotificationManager.shared.cancelAllNotifications()
+            HapticManager.shared.impact(style: .light)
+            return
+        }
+        
+        // Request permission
+        let granted = await NotificationManager.shared.requestAuthorization()
+        
+        if granted {
+            if style == .periodic {
+                await NotificationManager.shared.schedulePeriodicReminders(
+                    startHour: notifStartHour,
+                    endHour: notifEndHour,
+                    intervalHours: notifIntervalHours
+                )
+            } else if style == .smart {
+                await NotificationManager.shared.scheduleSmartReminders(
+                    dailyGoal: dailyGoalML,
+                    enableMilestones: smartNotifMilestones,
+                    enableInactivity: smartNotifInactivity,
+                    enableAchievement: smartNotifAchievement
+                )
+            }
+            HapticManager.shared.notification(type: .success)
+        } else {
+            await MainActor.run {
+                selectedNotificationStyle = .off
+                notificationStyleRaw = NotificationStyle.off.rawValue
+                showPermissionDeniedAlert = true
+            }
+            HapticManager.shared.notification(type: .error)
+        }
+    }
+    
+    private func rescheduleSmartNotifications() {
+        if selectedNotificationStyle == .smart {
+            Task {
+                await NotificationManager.shared.scheduleSmartReminders(
+                    dailyGoal: dailyGoalML,
+                    enableMilestones: smartNotifMilestones,
+                    enableInactivity: smartNotifInactivity,
+                    enableAchievement: smartNotifAchievement
+                )
             }
         }
     }
     
     private func deleteContainers(at offsets: IndexSet) {
+        // Delete associated images before removing containers
+        for index in offsets {
+            if let imageName = containers[index].imageName {
+                Container.deleteImage(filename: imageName)
+            }
+        }
         containers.remove(atOffsets: offsets)
         HapticManager.shared.impact(style: .medium)
     }
@@ -208,28 +325,26 @@ struct SettingsView: View {
         let displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour)
         return "\(displayHour):00 \(period)"
     }
+}
+
+// MARK: - Container Icon View
+struct ContainerIconView: View {
+    let container: Container
+    let size: CGFloat
     
-    private func handleNotificationToggle(enabled: Bool) async {
-        if enabled {
-            let granted = await NotificationManager.shared.requestAuthorization()
-            
-            if granted {
-                await NotificationManager.shared.scheduleWaterReminders(
-                    startHour: notifStartHour,
-                    endHour: notifEndHour,
-                    intervalHours: notifIntervalHours
-                )
-                HapticManager.shared.notification(type: .success)
+    var body: some View {
+        Group {
+            if let imageName = container.imageName,
+               let uiImage = Container.loadImage(filename: imageName) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()  // Changed from scaledToFill
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
             } else {
-                await MainActor.run {
-                    notificationsEnabled = false
-                    showPermissionDeniedAlert = true
-                }
-                HapticManager.shared.notification(type: .error)
+                Text(container.emoji)
+                    .font(.system(size: size * 0.7))
             }
-        } else {
-            NotificationManager.shared.cancelAllNotifications()
-            HapticManager.shared.impact(style: .light)
         }
     }
 }
@@ -242,6 +357,9 @@ struct AddContainerView: View {
     @State private var name = ""
     @State private var volumeML = ""
     @State private var selectedEmoji = "💧"
+    @State private var selectedImage: UIImage?
+    @State private var showImagePicker = false
+    @State private var useImage = false
     
     let emojiOptions = ["💧", "🥤", "🍶", "☕️", "🧃", "🍵", "🥛", "🧋", "🍺", "🥃"]
     
@@ -253,13 +371,57 @@ struct AddContainerView: View {
                     
                     TextField("Volume (mL)", text: $volumeML)
                         .keyboardType(.numberPad)
-                    
-                    Picker("Emoji", selection: $selectedEmoji) {
-                        ForEach(emojiOptions, id: \.self) { emoji in
-                            Text(emoji).tag(emoji)
-                        }
+                }
+                
+                Section("Icon") {
+                    Picker("Icon Type", selection: $useImage) {
+                        Text("Emoji").tag(false)
+                        Text("Photo").tag(true)
                     }
-                    .pickerStyle(.navigationLink)
+                    .pickerStyle(.segmented)
+                    
+                    if useImage {
+                        Button(action: {
+                            showImagePicker = true
+                        }) {
+                            HStack {
+                                if let image = selectedImage {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 60, height: 60)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Image(systemName: "photo.badge.plus")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(.blue)
+                                        .frame(width: 60, height: 60)
+                                }
+                                
+                                VStack(alignment: .leading) {
+                                    Text(selectedImage == nil ? "Choose Photo" : "Change Photo")
+                                        .font(.headline)
+                                    Text("Take a photo or select from library")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Picker("Emoji", selection: $selectedEmoji) {
+                            ForEach(emojiOptions, id: \.self) { emoji in
+                                Text(emoji).tag(emoji)
+                            }
+                        }
+                        .pickerStyle(.navigationLink)
+                    }
                 }
             }
             .navigationTitle("Add Container")
@@ -275,8 +437,11 @@ struct AddContainerView: View {
                     Button("Add") {
                         addContainer()
                     }
-                    .disabled(name.isEmpty || volumeML.isEmpty)
+                    .disabled(name.isEmpty || volumeML.isEmpty || (useImage && selectedImage == nil))
                 }
+            }
+            .sheet(isPresented: $showImagePicker) {
+                ImagePicker(selectedImage: $selectedImage)
             }
         }
     }
@@ -284,7 +449,17 @@ struct AddContainerView: View {
     private func addContainer() {
         guard let volume = Int(volumeML), volume > 0 else { return }
         
-        let newContainer = Container(name: name, volumeML: volume, emoji: selectedEmoji)
+        var imageName: String?
+        if useImage, let image = selectedImage {
+            imageName = Container.saveImage(image)
+        }
+        
+        let newContainer = Container(
+            name: name,
+            volumeML: volume,
+            emoji: selectedEmoji,
+            imageName: imageName
+        )
         containers.append(newContainer)
         
         HapticManager.shared.impact(style: .medium)
@@ -301,6 +476,10 @@ struct EditContainerView: View {
     @State private var name = ""
     @State private var volumeML = ""
     @State private var selectedEmoji = ""
+    @State private var selectedImage: UIImage?
+    @State private var showImagePicker = false
+    @State private var useImage = false
+    @State private var currentImageName: String?
     
     let emojiOptions = ["💧", "🥤", "🍶", "☕️", "🧃", "🍵", "🥛", "🧋", "🍺", "🥃"]
     
@@ -312,13 +491,64 @@ struct EditContainerView: View {
                     
                     TextField("Volume (mL)", text: $volumeML)
                         .keyboardType(.numberPad)
-                    
-                    Picker("Emoji", selection: $selectedEmoji) {
-                        ForEach(emojiOptions, id: \.self) { emoji in
-                            Text(emoji).tag(emoji)
-                        }
+                }
+                
+                Section("Icon") {
+                    Picker("Icon Type", selection: $useImage) {
+                        Text("Emoji").tag(false)
+                        Text("Photo").tag(true)
                     }
-                    .pickerStyle(.navigationLink)
+                    .pickerStyle(.segmented)
+                    
+                    if useImage {
+                        Button(action: {
+                            showImagePicker = true
+                        }) {
+                            HStack {
+                                if let image = selectedImage {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 60, height: 60)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else if let imageName = currentImageName,
+                                          let image = Container.loadImage(filename: imageName) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 60, height: 60)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Image(systemName: "photo.badge.plus")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(.blue)
+                                        .frame(width: 60, height: 60)
+                                }
+                                
+                                VStack(alignment: .leading) {
+                                    Text("Change Photo")
+                                        .font(.headline)
+                                    Text("Take a photo or select from library")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Picker("Emoji", selection: $selectedEmoji) {
+                            ForEach(emojiOptions, id: \.self) { emoji in
+                                Text(emoji).tag(emoji)
+                            }
+                        }
+                        .pickerStyle(.navigationLink)
+                    }
                 }
             }
             .navigationTitle("Edit Container")
@@ -341,6 +571,11 @@ struct EditContainerView: View {
                 name = container.name
                 volumeML = String(container.volumeML)
                 selectedEmoji = container.emoji
+                currentImageName = container.imageName
+                useImage = container.imageName != nil
+            }
+            .sheet(isPresented: $showImagePicker) {
+                ImagePicker(selectedImage: $selectedImage)
             }
         }
     }
@@ -349,9 +584,30 @@ struct EditContainerView: View {
         guard let volume = Int(volumeML), volume > 0 else { return }
         
         if let index = containers.firstIndex(where: { $0.id == container.id }) {
+            var imageName: String? = currentImageName
+            
+            // Handle image changes
+            if useImage {
+                if let newImage = selectedImage {
+                    // Delete old image if exists
+                    if let oldImageName = currentImageName {
+                        Container.deleteImage(filename: oldImageName)
+                    }
+                    // Save new image
+                    imageName = Container.saveImage(newImage)
+                }
+            } else {
+                // Switched to emoji, delete image
+                if let oldImageName = currentImageName {
+                    Container.deleteImage(filename: oldImageName)
+                }
+                imageName = nil
+            }
+            
             containers[index].name = name
             containers[index].volumeML = volume
             containers[index].emoji = selectedEmoji
+            containers[index].imageName = imageName
         }
         
         HapticManager.shared.impact(style: .medium)

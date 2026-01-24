@@ -104,8 +104,6 @@ struct ContentView: View {
                     )
                     .frame(height: 470)
                     
-                    // Replace the Training Day Toggle section with this:
-
                     // Training Day Toggle
                     HStack {
                         Image(systemName: isTrainingDay ? "figure.run.circle.fill" : "figure.run.circle")
@@ -131,7 +129,6 @@ struct ContentView: View {
                     .onChange(of: isTrainingDay) { _, newValue in
                         HapticManager.shared.impact(style: .medium)
                     }
-
 
                     // Quick-add buttons
                     if containers.isEmpty {
@@ -201,9 +198,11 @@ struct ContentView: View {
 
         let ml = Int(round(Double(container.volumeML) * portion.value))
 
+        // Store current training day status with the entry
         let entry = WaterEntry(
             timestamp: Date(),
             amountML: ml,
+            isTrainingDay: isTrainingDay,
             containerID: container.id,
             fractionNumerator: portion.numerator,
             fractionDenominator: portion.denominator
@@ -331,213 +330,216 @@ struct EnhancedWaterGlassView: View {
     @State private var velocity: CGFloat = 0.0
     @State private var displacement: CGFloat = 0.0
     @State private var lastScrollY: CGFloat = 0.0
-    @State private var lastFrameDate: Date = Date()
     @State private var isScrolling: Bool = false
     @State private var scrollTimeout: DispatchWorkItem?
+    
+    @State private var timer: Timer?
     
     let glassThickness: CGFloat = 4
 
     var body: some View {
-        TimelineView(.animation) { timeline in
-            GeometryReader { geometry in
-                let width = min(geometry.size.width * 0.65, 250)
-                let height = geometry.size.height * 0.85
-                let waterHeight = height * CGFloat(min(max(progress, 0.05), 1.0))
-                
-                let currentY = geometry.frame(in: .global).minY
-                
-                // Update Physics
-                let _ = updatePhysics(currentY: currentY, currentDate: timeline.date)
-                
-                // Calculate vertical wave offset
-                let verticalOffset = displacement * 0.3
+        GeometryReader { geometry in
+            let width = min(geometry.size.width * 0.65, 250)
+            let height = geometry.size.height * 0.85
+            
+            let currentY = geometry.frame(in: .global).minY
+            
+            // Calculate vertical wave offset
+            let verticalOffset = displacement * 0.3
 
-                ZStack {
-                    // Glass Background
-                    GlassShape()
-                        .fill(
-                            LinearGradient(
-                                colors: [.white.opacity(0.1), .white.opacity(0.05)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: width, height: height)
-
-                    ZStack(alignment: .bottom) {
-                        // Water with vertical sloshing
-                        WaterWaveShape(
-                            progress: progress,
-                            phase: wavePhase,
-                            amplitude: isScrolling ? 1.0 : 0.0,
-                            verticalOffset: verticalOffset
-                        )
-                        .fill(
-                            LinearGradient(
-                                colors: progress >= 1.0 ? [
-                                    Color.green.opacity(0.4),
-                                    Color.green,
-                                    Color.green.opacity(0.9)
-                                ] : [
-                                    Color.blue.opacity(0.3),
-                                    Color.blue,
-                                    Color(red: 0, green: 0.2, blue: 0.8)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: width - glassThickness * 2, height: height - glassThickness)
-                        .mask(GlassShape().padding(glassThickness))
-
-                        Canvas { context, size in
-                            for bubble in bubbles {
-                                let rect = CGRect(
-                                    x: bubble.x * size.width,
-                                    y: size.height - (bubble.y * size.height),
-                                    width: bubble.size,
-                                    height: bubble.size
-                                )
-                                context.opacity = bubble.opacity
-                                context.fill(Circle().path(in: rect), with: .color(.white.opacity(0.6)))
-                            }
-                        }
-                        .frame(width: width - glassThickness * 3, height: waterHeight)
-                        .mask(GlassShape().padding(glassThickness))
-                    }
-
-                    // Glass Highlights
-                    GlassShape()
-                        .stroke(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .white.opacity(0.1), location: 0),
-                                    .init(color: .white.opacity(0.6), location: 0.2),
-                                    .init(color: .white.opacity(0.1), location: 0.4),
-                                    .init(color: .white.opacity(0.1), location: 1)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 2
-                        )
-                        .frame(width: width, height: height)
-
-                    Path { path in
-                        path.move(to: CGPoint(x: width * 0.2, y: height * 0.1))
-                        path.addQuadCurve(
-                            to: CGPoint(x: width * 0.2, y: height * 0.9),
-                            control: CGPoint(x: width * 0.15, y: height * 0.5)
-                        )
-                    }
-                    .stroke(
+            ZStack {
+                // Glass Background
+                GlassShape()
+                    .fill(
                         LinearGradient(
-                            colors: [.white.opacity(0.0), .white.opacity(0.4), .white.opacity(0.0)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 4
+                            colors: [.white.opacity(0.1), .white.opacity(0.05)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
                     )
                     .frame(width: width, height: height)
 
-                    VStack(spacing: 4) {
-                        Text("\(percentage)%")
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .foregroundStyle(progress > 0.5 ? .white : .blue)
-                            .shadow(color: .black.opacity(progress > 0.5 ? 0.2 : 0), radius: 2)
+                ZStack(alignment: .bottom) {
+                    // Water with vertical sloshing
+                    WaterWaveShape(
+                        progress: progress,
+                        phase: wavePhase,
+                        amplitude: isScrolling ? 1.0 : 0.0,
+                        verticalOffset: verticalOffset
+                    )
+                    .fill(
+                        LinearGradient(
+                            colors: progress >= 1.0 ? [
+                                Color.green.opacity(0.4),
+                                Color.green,
+                                Color.green.opacity(0.9)
+                            ] : [
+                                Color.blue.opacity(0.3),
+                                Color.blue,
+                                Color(red: 0, green: 0.2, blue: 0.8)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: width - glassThickness * 2, height: height - glassThickness)
+                    .mask(GlassShape().padding(glassThickness))
 
-                        Text("\(currentAmount) / \(goalAmount) mL")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(progress > 0.5 ? .white.opacity(0.8) : .secondary)
+                    Canvas { context, size in
+                        for bubble in bubbles {
+                            let rect = CGRect(
+                                x: bubble.x * size.width,
+                                y: size.height - (bubble.y * size.height),
+                                width: bubble.size,
+                                height: bubble.size
+                            )
+                            context.opacity = bubble.opacity
+                            context.fill(Circle().path(in: rect), with: .color(.white.opacity(0.6)))
+                        }
                     }
+                    .frame(width: width - glassThickness * 3, height: height * CGFloat(min(max(progress, 0.05), 1.0)))
+                    .mask(GlassShape().padding(glassThickness))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+                // Glass Highlights
+                GlassShape()
+                    .stroke(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .white.opacity(0.1), location: 0),
+                                .init(color: .white.opacity(0.6), location: 0.2),
+                                .init(color: .white.opacity(0.1), location: 0.4),
+                                .init(color: .white.opacity(0.1), location: 1)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 2
+                    )
+                    .frame(width: width, height: height)
+
+                Path { path in
+                    path.move(to: CGPoint(x: width * 0.2, y: height * 0.1))
+                    path.addQuadCurve(
+                        to: CGPoint(x: width * 0.2, y: height * 0.9),
+                        control: CGPoint(x: width * 0.15, y: height * 0.5)
+                    )
+                }
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.0), .white.opacity(0.4), .white.opacity(0.0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 4
+                )
+                .frame(width: width, height: height)
+
+                VStack(spacing: 4) {
+                    Text("\(percentage)%")
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundStyle(progress > 0.5 ? .white : .blue)
+                        .shadow(color: .black.opacity(progress > 0.5 ? 0.2 : 0), radius: 2)
+
+                    Text("\(currentAmount) / \(goalAmount) mL")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(progress > 0.5 ? .white.opacity(0.8) : .secondary)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .onChange(of: currentY) { oldValue, newValue in
+                handleScrollChange(from: oldValue, to: newValue)
+            }
+        }
+        .onAppear {
+            startPhysicsTimer()
+        }
+        .onDisappear {
+            timer?.invalidate()
+            timer = nil
         }
         .onChange(of: waterAddedTrigger) { _, _ in
             spawnBubbles()
         }
     }
-
-    private func updatePhysics(currentY: CGFloat, currentDate: Date) {
-        DispatchQueue.main.async {
-            let deltaTime = currentDate.timeIntervalSince(self.lastFrameDate)
-            self.lastFrameDate = currentDate
-            let dt = min(deltaTime, 0.1)
-
-            if self.lastScrollY == 0 {
-                self.lastScrollY = currentY
-                return
-            }
-
-            // Calculate scroll velocity
-            let deltaY = currentY - self.lastScrollY
-            self.lastScrollY = currentY
-            
-            // Detect if actively scrolling
-            if abs(deltaY) > 0.1 {
-                self.isScrolling = true
-                
-                // Apply force from scrolling (spring physics)
-                self.velocity += deltaY * 0.8
-                
-                // Update horizontal wave phase only when scrolling
-                self.wavePhase += abs(deltaY) * 0.15
-                
-                // Cancel previous timeout
-                self.scrollTimeout?.cancel()
-                
-                // Set timeout to mark scrolling as stopped
-                let workItem = DispatchWorkItem {
-                    self.isScrolling = false
-                }
-                self.scrollTimeout = workItem
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
-            }
-            
-            // Spring physics for vertical displacement
-            let springStiffness: CGFloat = 120.0
-            let damping: CGFloat = 12.0
-            
-            // Spring force towards equilibrium (0)
-            let springForce = -springStiffness * self.displacement
-            let dampingForce = -damping * self.velocity
-            
-            let acceleration = springForce + dampingForce
-            self.velocity += acceleration * dt
-            self.displacement += self.velocity * dt
-            
-            // Clamp displacement to prevent extreme values
-            self.displacement = max(-20, min(20, self.displacement))
-            
-            // Stop oscillation when very small
-            if abs(self.displacement) < 0.01 && abs(self.velocity) < 0.1 {
-                self.displacement = 0
-                self.velocity = 0
-            }
-            
-            // Update bubbles
-            self.updateBubbles(dt: dt)
+    
+    private func startPhysicsTimer() {
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { _ in
+            updatePhysics()
         }
+    }
+    
+    private func handleScrollChange(from oldY: CGFloat, to newY: CGFloat) {
+        if lastScrollY == 0 {
+            lastScrollY = newY
+            return
+        }
+        
+        let deltaY = newY - lastScrollY
+        lastScrollY = newY
+        
+        if abs(deltaY) > 0.1 {
+            isScrolling = true
+            velocity += deltaY * 0.8
+            wavePhase += abs(deltaY) * 0.15
+            
+            scrollTimeout?.cancel()
+            let workItem = DispatchWorkItem {
+                isScrolling = false
+            }
+            scrollTimeout = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
+        }
+    }
+
+    private func updatePhysics() {
+        let dt = 1.0 / 60.0
+        
+        // Spring physics for vertical displacement
+        let springStiffness: CGFloat = 120.0
+        let damping: CGFloat = 12.0
+        
+        let springForce = -springStiffness * displacement
+        let dampingForce = -damping * velocity
+        
+        let acceleration = springForce + dampingForce
+        velocity += acceleration * CGFloat(dt)
+        displacement += velocity * CGFloat(dt)
+        
+        displacement = max(-20, min(20, displacement))
+        
+        if abs(displacement) < 0.01 && abs(velocity) < 0.1 {
+            displacement = 0
+            velocity = 0
+        }
+        
+        // Update bubbles
+        updateBubbles(dt: dt)
     }
 
     private func updateBubbles(dt: TimeInterval) {
         var active: [BubbleParticle] = []
+        
         for var b in bubbles {
-            b.y += b.speed * (dt * 60.0)
-            b.x += Foundation.sin(b.y * 10) * 0.005
-            if b.y < 1.0 { active.append(b) }
+            b.y += b.speed * dt
+            b.x += sin(b.y * 10) * 0.001
+            b.opacity -= dt * 0.5
+            
+            if b.y < 1.0 && b.opacity > 0 {
+                active.append(b)
+            }
         }
         bubbles = active
     }
 
     private func spawnBubbles() {
-        for _ in 0..<15 {
+        for _ in 0..<8 {
             bubbles.append(BubbleParticle())
         }
     }
 }
+
 
 // MARK: - Shapes
 struct GlassShape: Shape {
@@ -619,11 +621,11 @@ struct WaterWaveShape: Shape {
 
 struct BubbleParticle: Identifiable {
     let id = UUID()
-    var x: Double = Double.random(in: 0.1...0.9)
+    var x: Double = Double.random(in: 0.15...0.85)
     var y: Double = 0
-    var speed: Double = Double.random(in: 0.01...0.02)
-    var size: Double = Double.random(in: 4...10)
-    var opacity: Double = Double.random(in: 0.4...0.8)
+    var speed: Double = Double.random(in: 0.8...1.5)  // Speed in units per second
+    var size: Double = Double.random(in: 4...9)
+    var opacity: Double = Double.random(in: 0.6...0.9)
 }
 
 #Preview {

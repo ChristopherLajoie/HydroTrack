@@ -5,6 +5,8 @@ struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WaterEntry.timestamp, order: .reverse) private var allEntries: [WaterEntry]
     @AppStorage("dailyGoalML") private var dailyGoalML = 2000
+    @AppStorage("trainingDayGoalML") private var trainingDayGoalML = 3000
+    @AppStorage("isTrainingDay") private var isTrainingDay = false  // For today's status
     @AppStorage("containers") private var containersJSON = Container.defaults.toJSON()
     
     @State private var selectedMonth = Date()
@@ -24,7 +26,8 @@ struct HistoryView: View {
                     // Monthly stats at top
                     MonthStatsView(
                         entries: entriesForMonth(selectedMonth),
-                        goal: dailyGoalML
+                        dailyGoal: dailyGoalML,
+                        trainingDayGoal: trainingDayGoalML
                     )
                     .padding(.horizontal)
                     .padding(.top, 30)
@@ -65,14 +68,15 @@ struct HistoryView: View {
                     }
                     .padding(.horizontal)
                     
-                    // Calendar grid
+                    // Calendar grid - FIXED: Use enumerated indices for unique IDs
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 8) {
-                        ForEach(daysInMonth, id: \.self) { date in
+                        ForEach(Array(daysInMonth.enumerated()), id: \.offset) { index, date in
                             if let date = date {
                                 DayCell(
                                     date: date,
                                     total: totalForDate(date),
-                                    goal: dailyGoalML,
+                                    goal: goalForDate(date),
+                                    isTrainingDay: isTrainingDayForDate(date),
                                     isToday: calendar.isDateInToday(date),
                                     isSelected: selectedDate != nil && calendar.isDate(date, inSameDayAs: selectedDate!)
                                 )
@@ -100,7 +104,8 @@ struct HistoryView: View {
                         DayDetailView(
                             date: selected,
                             entries: entriesForDate(selected),
-                            goal: dailyGoalML,
+                            goal: goalForDate(selected),
+                            isTrainingDay: isTrainingDayForDate(selected),
                             containers: containers,
                             onDelete: deleteEntry
                         )
@@ -183,6 +188,23 @@ struct HistoryView: View {
         allEntries.filter { calendar.isDate($0.timestamp, equalTo: date, toGranularity: .month) }
     }
     
+    // Determine if a specific date was a training day
+    private func isTrainingDayForDate(_ date: Date) -> Bool {
+        // For today: use AppStorage value even if no entries
+        if calendar.isDateInToday(date) {
+            return isTrainingDay
+        }
+        
+        // For past days: check entries
+        let dayEntries = entriesForDate(date)
+        return dayEntries.contains { $0.isTrainingDay }
+    }
+    
+    // Get the correct goal for a specific date
+    private func goalForDate(_ date: Date) -> Int {
+        isTrainingDayForDate(date) ? trainingDayGoalML : dailyGoalML
+    }
+    
     private func deleteEntry(_ entry: WaterEntry) {
         withAnimation {
             modelContext.delete(entry)
@@ -196,6 +218,7 @@ struct DayCell: View {
     let date: Date
     let total: Int
     let goal: Int
+    let isTrainingDay: Bool
     let isToday: Bool
     let isSelected: Bool
     
@@ -224,6 +247,13 @@ struct DayCell: View {
                     .fill(Color.clear)
                     .frame(width: 8, height: 8)
             }
+            
+            // Training day indicator
+            if isTrainingDay {
+                Image(systemName: "figure.run")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.orange)
+            }
         }
         .frame(maxWidth: .infinity)
         .frame(height: 60)
@@ -241,16 +271,13 @@ struct DayCell: View {
 // MARK: - Month Stats View
 struct MonthStatsView: View {
     let entries: [WaterEntry]
-    let goal: Int
+    let dailyGoal: Int
+    let trainingDayGoal: Int
     
     private var averageML: Int {
         guard !entries.isEmpty else { return 0 }
-        let days = Set(entries.map { Calendar.current.startOfDay(for: $0.timestamp) }).count
-        let totalML = entries.reduce(0) { $0 + $1.amountML }
-        return days > 0 ? totalML / days : 0
-    }
-    
-    private var currentStreak: Int {
+        
+        // Group entries by day
         let calendar = Calendar.current
         var dailyTotals: [Date: Int] = [:]
         
@@ -259,14 +286,38 @@ struct MonthStatsView: View {
             dailyTotals[day, default: 0] += entry.amountML
         }
         
+        let days = dailyTotals.count
+        let totalML = dailyTotals.values.reduce(0, +)
+        return days > 0 ? totalML / days : 0
+    }
+    
+    private var currentStreak: Int {
+        let calendar = Calendar.current
+        var dailyData: [Date: (total: Int, isTrainingDay: Bool)] = [:]
+        
+        // Group by day with training status
+        for entry in entries {
+            let day = calendar.startOfDay(for: entry.timestamp)
+            let existing = dailyData[day] ?? (total: 0, isTrainingDay: false)
+            dailyData[day] = (
+                total: existing.total + entry.amountML,
+                isTrainingDay: existing.isTrainingDay || entry.isTrainingDay
+            )
+        }
+        
         var streak = 0
         var currentDate = calendar.startOfDay(for: Date())
         
         while true {
-            if let total = dailyTotals[currentDate], total >= goal {
-                streak += 1
-                guard let previousDay = calendar.date(byAdding: .day, value: -1, to: currentDate) else { break }
-                currentDate = previousDay
+            if let dayData = dailyData[currentDate] {
+                let goal = dayData.isTrainingDay ? trainingDayGoal : dailyGoal
+                if dayData.total >= goal {
+                    streak += 1
+                    guard let previousDay = calendar.date(byAdding: .day, value: -1, to: currentDate) else { break }
+                    currentDate = previousDay
+                } else {
+                    break
+                }
             } else {
                 break
             }
@@ -311,12 +362,13 @@ struct DayDetailView: View {
     let date: Date
     let entries: [WaterEntry]
     let goal: Int
+    let isTrainingDay: Bool
     let containers: [Container]
     let onDelete: (WaterEntry) -> Void
 
     private var dateString: String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMMM d, yyyy"
+        formatter.dateFormat = "MMM d"  // Compact format: "Jan 21"
         return formatter.string(from: date)
     }
 
@@ -332,9 +384,26 @@ struct DayDetailView: View {
         VStack(spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(dateString)
-                        .font(.headline)
-                    Text("\(Int(progress * 100))%")
+                    HStack(spacing: 8) {
+                        Text(dateString)
+                            .font(.headline)
+                        
+                        if isTrainingDay {
+                            HStack(spacing: 4) {
+                                Image(systemName: "figure.run")
+                                    .font(.caption)
+                                Text("Training Day")
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.orange)
+                            .clipShape(Capsule())
+                        }
+                    }
+                    
+                    Text("\(Int(progress * 100))%")  // Only percentage, no goal text
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

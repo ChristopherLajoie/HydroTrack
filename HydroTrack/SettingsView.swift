@@ -18,11 +18,6 @@ struct SettingsView: View {
     @AppStorage("notifEndHour") private var notifEndHour = 21
     @AppStorage("notifIntervalHours") private var notifIntervalHours = 2
     
-    // Smart notification settings
-    @AppStorage("smartNotifMilestones") private var smartNotifMilestones = true
-    @AppStorage("smartNotifInactivity") private var smartNotifInactivity = true
-    @AppStorage("smartNotifAchievement") private var smartNotifAchievement = true
-    
     @AppStorage("containers") private var containersJSON = Container.defaults.toJSON()
     
     @FocusState private var isGoalFieldFocused: Bool
@@ -37,8 +32,6 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                // Replace your Daily Goal section with this merged version:
-
                 Section {
                     HStack {
                         Text("Daily Goal")
@@ -47,6 +40,7 @@ struct SettingsView: View {
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 100)
+                            .focused($isGoalFieldFocused)
                         Text("mL")
                     }
                     
@@ -59,6 +53,7 @@ struct SettingsView: View {
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 100)
+                            .focused($isGoalFieldFocused)
                         Text("mL")
                     }
                 } header: {
@@ -68,29 +63,31 @@ struct SettingsView: View {
                 // Container Management Section
                 Section {
                     ForEach(containers) { container in
-                        HStack {
-                            ContainerIconView(container: container, size: 36)
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(container.name)
-                                    .font(.headline)
-                                Text("\(container.volumeML) mL")
+                        Button(action: {
+                            editingContainer = container
+                        }) {
+                            HStack {
+                                ContainerIconView(container: container, size: 36)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(container.name)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    Text("\(container.volumeML) mL")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            
-                            Spacer()
-                            
-                            Button(action: {
-                                editingContainer = container
-                            }) {
-                                Image(systemName: "pencil.circle.fill")
-                                    .font(.title3)
-                                    .foregroundStyle(.blue)
-                            }
-                            .buttonStyle(.plain)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 4)
+                        .buttonStyle(.plain)
                     }
                     .onDelete(perform: deleteContainers)
                     .onMove(perform: moveContainers)
@@ -99,7 +96,9 @@ struct SettingsView: View {
                         showAddContainerSheet = true
                     }) {
                         Label("Add Container", systemImage: "plus.circle.fill")
+                            .foregroundStyle(.blue)
                     }
+                    .buttonStyle(.plain)
                 } header: {
                     Text("Containers")
                 } footer: {
@@ -121,6 +120,45 @@ struct SettingsView: View {
                         }
                     }
                     
+                    // Test Notification Button (Debug Only)
+                    #if DEBUG
+                    if selectedNotificationStyle != .off {
+                        Button(action: {
+                            Task {
+                                if selectedNotificationStyle == .smart {
+                                    await NotificationManager.shared.scheduleTestSmartNotification()
+                                } else {
+                                    await NotificationManager.shared.scheduleTestPeriodicNotification()
+                                }
+                                HapticManager.shared.notification(type: .success)
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "bell.badge.fill")
+                                    .foregroundStyle(.orange)
+                                Text("Send Test Notification")
+                                Spacer()
+                                Text("5 sec")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        
+                        Button(action: {
+                            Task {
+                                await NotificationManager.shared.debugPendingNotifications()
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "list.bullet.clipboard")
+                                    .foregroundStyle(.purple)
+                                Text("Debug Scheduled Notifications")
+                                Spacer()
+                            }
+                        }
+                    }
+                    #endif
+                    
                     // Periodic Settings
                     if selectedNotificationStyle == .periodic {
                         Picker("Start Time", selection: $notifStartHour) {
@@ -141,56 +179,17 @@ struct SettingsView: View {
                             Text("3 hours").tag(3)
                             Text("4 hours").tag(4)
                         }
-                    }
-                    
-                    // Smart Settings
-                    if selectedNotificationStyle == .smart {
-                        Toggle(isOn: $smartNotifMilestones) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Progress Milestones")
-                                    .font(.headline)
-                                Text("12pm, 3pm, 6pm, 9pm")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .onChange(of: smartNotifMilestones) { _, _ in
-                            rescheduleSmartNotifications()
-                        }
-                        
-                        Toggle(isOn: $smartNotifInactivity) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Inactivity Alerts")
-                                    .font(.headline)
-                                Text("Reminds you if inactive")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .onChange(of: smartNotifInactivity) { _, _ in
-                            rescheduleSmartNotifications()
-                        }
-                        
-                        Toggle(isOn: $smartNotifAchievement) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Achievement Reminders")
-                                    .font(.headline)
-                                Text("Motivational push to finish")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .onChange(of: smartNotifAchievement) { _, _ in
-                            rescheduleSmartNotifications()
+                        .onChange(of: notifIntervalHours) { _, _ in
+                            reschedulePeriodicNotifications()
                         }
                     }
                 } header: {
                     Text("Reminders")
                 } footer: {
                     if selectedNotificationStyle == .periodic {
-                        Text("Receive reminders at regular intervals during your active hours")
+                        Text("Receive time-aware reminders at regular intervals during your active hours")
                     } else if selectedNotificationStyle == .smart {
-                        Text("Reminders adapt to your progress and habits")
+                        Text("Adaptive reminders that adjust based on your progress")
                     } else {
                         Text("No notifications will be sent")
                     }
@@ -219,7 +218,14 @@ struct SettingsView: View {
             .safeAreaInset(edge: .top) {
                 Color.clear.frame(height: 8)
             }
-            .dismissKeyboardOnTap()
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        isGoalFieldFocused = false
+                    }
+                }
+            }
             .alert("Notifications Disabled", isPresented: $showPermissionDeniedAlert) {
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -253,8 +259,10 @@ struct SettingsView: View {
     }
     
     private func handleNotificationStyleChange(_ style: NotificationStyle) async {
+        // ALWAYS cancel all notifications first to avoid conflicts
+        NotificationManager.shared.cancelAllNotifications()
+        
         if style == .off {
-            NotificationManager.shared.cancelAllNotifications()
             HapticManager.shared.impact(style: .light)
             return
         }
@@ -270,12 +278,7 @@ struct SettingsView: View {
                     intervalHours: notifIntervalHours
                 )
             } else if style == .smart {
-                await NotificationManager.shared.scheduleSmartReminders(
-                    dailyGoal: dailyGoalML,
-                    enableMilestones: smartNotifMilestones,
-                    enableInactivity: smartNotifInactivity,
-                    enableAchievement: smartNotifAchievement
-                )
+                await NotificationManager.shared.scheduleSmartReminders()
             }
             HapticManager.shared.notification(type: .success)
         } else {
@@ -288,14 +291,13 @@ struct SettingsView: View {
         }
     }
     
-    private func rescheduleSmartNotifications() {
-        if selectedNotificationStyle == .smart {
+    private func reschedulePeriodicNotifications() {
+        if selectedNotificationStyle == .periodic {
             Task {
-                await NotificationManager.shared.scheduleSmartReminders(
-                    dailyGoal: dailyGoalML,
-                    enableMilestones: smartNotifMilestones,
-                    enableInactivity: smartNotifInactivity,
-                    enableAchievement: smartNotifAchievement
+                await NotificationManager.shared.schedulePeriodicReminders(
+                    startHour: notifStartHour,
+                    endHour: notifEndHour,
+                    intervalHours: notifIntervalHours
                 )
             }
         }
@@ -357,8 +359,6 @@ struct AddContainerView: View {
     @State private var showImagePicker = false
     @State private var useImage = false
     
-    let emojiOptions = ["💧", "🥤", "🍶", "☕️", "🧃", "🍵", "🥛", "🧋", "🍺", "🥃"]
-    
     var body: some View {
         NavigationStack {
             Form {
@@ -411,12 +411,21 @@ struct AddContainerView: View {
                         }
                         .buttonStyle(.plain)
                     } else {
-                        Picker("Emoji", selection: $selectedEmoji) {
-                            ForEach(emojiOptions, id: \.self) { emoji in
-                                Text(emoji).tag(emoji)
-                            }
+                        HStack {
+                            Text("Emoji")
+                                .foregroundStyle(.primary)
+                            
+                            Spacer()
+                            
+                            TextField("", text: $selectedEmoji)
+                                .multilineTextAlignment(.trailing)
+                                .font(.system(size: 40))
+                                .frame(width: 60)
+                                .onChange(of: selectedEmoji) { _, newValue in
+                                    // Keep only the first emoji (emojis can be 1-2 chars)
+                                    selectedEmoji = String(newValue.prefix(2))
+                                }
                         }
-                        .pickerStyle(.navigationLink)
                     }
                 }
             }
@@ -477,8 +486,6 @@ struct EditContainerView: View {
     @State private var useImage = false
     @State private var currentImageName: String?
     
-    let emojiOptions = ["💧", "🥤", "🍶", "☕️", "🧃", "🍵", "🥛", "🧋", "🍺", "🥃"]
-    
     var body: some View {
         NavigationStack {
             Form {
@@ -538,12 +545,21 @@ struct EditContainerView: View {
                         }
                         .buttonStyle(.plain)
                     } else {
-                        Picker("Emoji", selection: $selectedEmoji) {
-                            ForEach(emojiOptions, id: \.self) { emoji in
-                                Text(emoji).tag(emoji)
-                            }
+                        HStack {
+                            Text("Emoji")
+                                .foregroundStyle(.primary)
+                            
+                            Spacer()
+                            
+                            TextField("", text: $selectedEmoji)
+                                .multilineTextAlignment(.trailing)
+                                .font(.system(size: 40))
+                                .frame(width: 60)
+                                .onChange(of: selectedEmoji) { _, newValue in
+                                    // Keep only the first emoji (emojis can be 1-2 chars)
+                                    selectedEmoji = String(newValue.prefix(2))
+                                }
                         }
-                        .pickerStyle(.navigationLink)
                     }
                 }
             }

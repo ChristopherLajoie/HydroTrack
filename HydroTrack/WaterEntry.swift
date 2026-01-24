@@ -5,8 +5,9 @@ import SwiftData
 final class WaterEntry {
     var timestamp: Date
     var amountML: Int
+    var isTrainingDay: Bool  // New field
 
-    // New (optional) metadata so History can show “Container + fraction” instead of mL.
+    // Metadata so History can show "Container + fraction" instead of mL.
     var containerID: UUID?
     var fractionNumerator: Int?
     var fractionDenominator: Int?
@@ -14,12 +15,14 @@ final class WaterEntry {
     init(
         timestamp: Date = Date(),
         amountML: Int,
+        isTrainingDay: Bool = false,  // New parameter
         containerID: UUID? = nil,
         fractionNumerator: Int? = nil,
         fractionDenominator: Int? = nil
     ) {
         self.timestamp = timestamp
         self.amountML = amountML
+        self.isTrainingDay = isTrainingDay
         self.containerID = containerID
         self.fractionNumerator = fractionNumerator
         self.fractionDenominator = fractionDenominator

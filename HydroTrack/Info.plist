@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>HydroTrack needs access to your photo library to set custom container icons&quot;</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>&quot;HydroTrack needs camera access to take photos of your containers&quot;</string>
+</dict>
+</plist>

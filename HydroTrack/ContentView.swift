@@ -438,7 +438,7 @@ struct EnhancedWaterGlassView: View {
                 VStack(spacing: 4) {
                     Text("\(percentage)%")
                         .font(.system(size: 48, weight: .bold, design: .rounded))
-                        .foregroundStyle(progress > 0.5 ? .white : .blue)
+                        .foregroundStyle(progress >= 0.5 ? .white : .blue)
                         .shadow(color: .black.opacity(progress > 0.5 ? 0.2 : 0), radius: 2)
 
                     Text("\(currentAmount) / \(goalAmount) mL")

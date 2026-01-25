@@ -11,6 +11,8 @@ struct HistoryView: View {
     
     @State private var selectedMonth = Date()
     @State private var selectedDate: Date? = Calendar.current.startOfDay(for: Date())
+    @State private var showAddSheet = false
+    @State private var selectedDateForEntry: Date?
     
     private let calendar = Calendar.current
     private let daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -107,7 +109,11 @@ struct HistoryView: View {
                             goal: goalForDate(selected),
                             isTrainingDay: isTrainingDayForDate(selected),
                             containers: containers,
-                            onDelete: deleteEntry
+                            onDelete: deleteEntry,
+                            onAddContainer: {
+                                selectedDateForEntry = selected
+                                showAddSheet = true
+                            }
                         )
                         .padding(.horizontal)
                         .transition(.asymmetric(
@@ -120,6 +126,23 @@ struct HistoryView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .sheet(isPresented: $showAddSheet) {
+                if let date = selectedDateForEntry {
+                    AddContainerToHistorySheet(
+                        date: date,
+                        containers: containers,
+                        onAdd: { container, portion in
+                            addWater(container: container, portion: portion, to: date)
+                            showAddSheet = false
+                            selectedDateForEntry = nil
+                        },
+                        onCancel: {
+                            showAddSheet = false
+                            selectedDateForEntry = nil
+                        }
+                    )
+                }
+            }
         }
     }
     
@@ -228,6 +251,29 @@ struct HistoryView: View {
             modelContext.delete(entry)
             HapticManager.shared.impact(style: .medium)
         }
+    }
+    
+    // Add water to a specific date
+    private func addWater(container: Container, portion: ContainerPortion, to date: Date) {
+        let ml = Int(round(Double(container.volumeML) * portion.value))
+        
+        // Use the training day status for that specific date
+        let wasTrainingDay = isTrainingDayForDate(date)
+        
+        // Create timestamp at the end of the day to avoid conflicts
+        let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: date) ?? date
+        
+        let entry = WaterEntry(
+            timestamp: endOfDay,
+            amountML: ml,
+            isTrainingDay: wasTrainingDay,
+            containerID: container.id,
+            fractionNumerator: portion.numerator,
+            fractionDenominator: portion.denominator
+        )
+        
+        modelContext.insert(entry)
+        HapticManager.shared.impact(style: .light)
     }
 }
 
@@ -408,6 +454,7 @@ struct DayDetailView: View {
     let isTrainingDay: Bool
     let containers: [Container]
     let onDelete: (WaterEntry) -> Void
+    let onAddContainer: () -> Void
 
     private var dateString: String {
         let formatter = DateFormatter()
@@ -421,6 +468,10 @@ struct DayDetailView: View {
 
     private var progress: Double {
         Double(total) / Double(goal)
+    }
+    
+    private var isPastDay: Bool {
+        !Calendar.current.isDateInToday(date)
     }
 
     var body: some View {
@@ -457,6 +508,25 @@ struct DayDetailView: View {
 
             Divider()
 
+            // Add Container Button - only for past days
+            if isPastDay && !containers.isEmpty {
+                Button(action: onAddContainer) {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Add Container")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.blue)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .padding(.horizontal)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+            }
+
             if entries.isEmpty {
                 Text("No entries for this day")
                     .font(.subheadline)
@@ -472,7 +542,7 @@ struct DayDetailView: View {
                                 .frame(width: 50, alignment: .leading)
 
                             if let display = displayForEntry(entry) {
-                                ContainerIconView(container: display.container, size: 24)
+                                HistoryContainerIconView(container: display.container, size: 24)
 
                                 Text(display.text)
                                     .font(.subheadline)
@@ -531,6 +601,150 @@ struct DayDetailView: View {
         }
 
         return nil
+    }
+}
+
+// MARK: - Add Container to History Sheet (Combined Container and Fraction Picker)
+struct AddContainerToHistorySheet: View {
+    let date: Date
+    let containers: [Container]
+    let onAdd: (Container, ContainerPortion) -> Void
+    let onCancel: () -> Void
+    
+    @State private var selectedContainer: Container?
+    
+    private var dateString: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMM d"
+        return formatter.string(from: date)
+    }
+    
+    private func ml(for portion: ContainerPortion) -> Int {
+        guard let container = selectedContainer else { return 0 }
+        return Int(round(Double(container.volumeML) * portion.value))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let container = selectedContainer {
+                    // Fraction selection view
+                    List {
+                        Section {
+                            HStack(spacing: 12) {
+                                HistoryContainerIconView(container: container, size: 56)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(container.name)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    Text("\(container.volumeML) mL")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+                                
+                                Button(action: { selectedContainer = nil }) {
+                                    Text("Change")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .padding(.vertical, 6)
+                        }
+
+                        Section("Select amount") {
+                            ForEach(ContainerPortion.allCases) { portion in
+                                Button {
+                                    onAdd(container, portion)
+                                } label: {
+                                    HStack {
+                                        Text(portion.label)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+
+                                        Spacer()
+
+                                        Text("\(ml(for: portion)) mL")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } else {
+                    // Container selection view
+                    List {
+                        Section("Select a container") {
+                            ForEach(containers) { container in
+                                Button {
+                                    selectedContainer = container
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        HistoryContainerIconView(container: container, size: 44)
+
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(container.name)
+                                                .font(.headline)
+                                                .foregroundStyle(.primary)
+                                            Text("\(container.volumeML) mL")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                        }
+
+                                        Spacer()
+
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            .navigationTitle(dateString)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+// MARK: - Container Icon View (local version to avoid conflicts)
+struct HistoryContainerIconView: View {
+    let container: Container
+    let size: CGFloat
+    
+    var body: some View {
+        ZStack {
+            if let imageName = container.imageName,
+               let uiImage = Container.loadImage(filename: imageName) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+            } else {
+                Text(container.emoji)
+                    .font(.system(size: size * 0.6))
+                    .frame(width: size, height: size)
+                    .background(Circle().fill(Color.blue.opacity(0.1)))
+            }
+        }
     }
 }
 

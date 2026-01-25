@@ -11,17 +11,17 @@ class NotificationManager {
     // MARK: - Setup
     
     private func setupNotificationCategories() {
-        // Define actions for smart notifications
+        // Define actions for smart notifications - NO .foreground option!
         let onPaceAction = UNNotificationAction(
             identifier: "ON_PACE_ACTION",
             title: "On pace ✅",
-            options: [.foreground]
+            options: []  // Empty options = handle in background
         )
         
         let lateAction = UNNotificationAction(
             identifier: "LATE_ACTION",
             title: "Late ⏰",
-            options: [.foreground]
+            options: []  // Empty options = handle in background
         )
         
         // Create category with actions

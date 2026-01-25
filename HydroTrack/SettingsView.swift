@@ -37,7 +37,9 @@ struct SettingsView: View {
                         Text("Daily Goal")
                         Spacer()
                         TextField("mL", value: $dailyGoalML, format: .number)
-                            .keyboardType(.numberPad)
+                            .keyboardType(.numbersAndPunctuation)
+                            .submitLabel(.done)
+                            .onSubmit { isGoalFieldFocused = false }
                             .multilineTextAlignment(.trailing)
                             .frame(width: 100)
                             .focused($isGoalFieldFocused)
@@ -50,7 +52,9 @@ struct SettingsView: View {
                         }
                         Spacer()
                         TextField("mL", value: $trainingDayGoalML, format: .number)
-                            .keyboardType(.numberPad)
+                            .keyboardType(.numbersAndPunctuation)
+                            .submitLabel(.done)
+                            .onSubmit { isGoalFieldFocused = false }
                             .multilineTextAlignment(.trailing)
                             .frame(width: 100)
                             .focused($isGoalFieldFocused)
@@ -217,14 +221,6 @@ struct SettingsView: View {
             .scrollIndicators(.hidden)
             .safeAreaInset(edge: .top) {
                 Color.clear.frame(height: 8)
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") {
-                        isGoalFieldFocused = false
-                    }
-                }
             }
             .alert("Notifications Disabled", isPresented: $showPermissionDeniedAlert) {
                 Button("Open Settings") {

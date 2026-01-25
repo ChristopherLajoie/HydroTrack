@@ -68,7 +68,7 @@ struct HistoryView: View {
                     }
                     .padding(.horizontal)
                     
-                    // Calendar grid - FIXED: Use enumerated indices for unique IDs
+                    // Calendar grid
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 8) {
                         ForEach(Array(daysInMonth.enumerated()), id: \.offset) { index, date in
                             if let date = date {
@@ -158,14 +158,32 @@ struct HistoryView: View {
     }
     
     private func previousMonth() {
-        selectedMonth = calendar.date(byAdding: .month, value: -1, to: selectedMonth) ?? selectedMonth
-        selectedDate = nil
+        guard let newMonth = calendar.date(byAdding: .month, value: -1, to: selectedMonth) else { return }
+        selectedMonth = newMonth
+        
+        // If navigating back to current month, auto-select today
+        if calendar.isDate(newMonth, equalTo: Date(), toGranularity: .month) {
+            withAnimation {
+                selectedDate = calendar.startOfDay(for: Date())
+            }
+        } else {
+            selectedDate = nil
+        }
     }
     
     private func nextMonth() {
         guard !isCurrentMonth else { return }
-        selectedMonth = calendar.date(byAdding: .month, value: 1, to: selectedMonth) ?? selectedMonth
-        selectedDate = nil
+        guard let newMonth = calendar.date(byAdding: .month, value: 1, to: selectedMonth) else { return }
+        selectedMonth = newMonth
+        
+        // If navigating back to current month, auto-select today
+        if calendar.isDate(newMonth, equalTo: Date(), toGranularity: .month) {
+            withAnimation {
+                selectedDate = calendar.startOfDay(for: Date())
+            }
+        } else {
+            selectedDate = nil
+        }
     }
     
     private func monthYearString(_ date: Date) -> String {
@@ -232,28 +250,37 @@ struct DayCell: View {
         return formatter.string(from: date)
     }
     
+    private var textColor: Color {
+        if isToday {
+            return .white
+        } else if total == 0 {
+            return .secondary  // Grey for no entries
+        } else if progress >= 1.0 {
+            return .green  // Green for goal reached
+        } else {
+            return .primary  // White/primary for entries but goal not reached
+        }
+    }
+    
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 0) {
+            // Day number - fixed position
             Text(dayNumber)
-                .font(.headline)
-                .foregroundStyle(isToday ? .white : (total > 0 ? .primary : .secondary))
+                .font(.body)  // Regular font, not bold
+                .foregroundStyle(textColor)
+                .frame(height: 24)
             
-            if total > 0 {
-                Circle()
-                    .fill(progress >= 1.0 ? Color.green : Color.blue)
-                    .frame(width: 8, height: 8)
-            } else {
-                Circle()
-                    .fill(Color.clear)
-                    .frame(width: 8, height: 8)
+            // Training day indicator - fixed position below number
+            Group {
+                if isTrainingDay {
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                } else {
+                    Color.clear
+                }
             }
-            
-            // Training day indicator
-            if isTrainingDay {
-                Image(systemName: "figure.run")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.orange)
-            }
+            .frame(height: 12)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 60)
@@ -274,21 +301,37 @@ struct MonthStatsView: View {
     let dailyGoal: Int
     let trainingDayGoal: Int
     
-    private var averageML: Int {
+    private var averagePercentage: Int {
         guard !entries.isEmpty else { return 0 }
         
-        // Group entries by day
+        // Group entries by day with training day status
         let calendar = Calendar.current
-        var dailyTotals: [Date: Int] = [:]
+        var dailyData: [Date: (total: Int, isTrainingDay: Bool)] = [:]
         
         for entry in entries {
             let day = calendar.startOfDay(for: entry.timestamp)
-            dailyTotals[day, default: 0] += entry.amountML
+            let existing = dailyData[day] ?? (total: 0, isTrainingDay: false)
+            dailyData[day] = (
+                total: existing.total + entry.amountML,
+                isTrainingDay: existing.isTrainingDay || entry.isTrainingDay
+            )
         }
         
-        let days = dailyTotals.count
-        let totalML = dailyTotals.values.reduce(0, +)
-        return days > 0 ? totalML / days : 0
+        guard !dailyData.isEmpty else { return 0 }
+        
+        // Calculate average consumption and average goal
+        var totalConsumption = 0
+        var totalGoal = 0
+        
+        for (_, data) in dailyData {
+            totalConsumption += data.total
+            totalGoal += data.isTrainingDay ? trainingDayGoal : dailyGoal
+        }
+        
+        let avgConsumption = totalConsumption / dailyData.count
+        let avgGoal = totalGoal / dailyData.count
+        
+        return avgGoal > 0 ? Int((Double(avgConsumption) / Double(avgGoal)) * 100) : 0
     }
     
     private var currentStreak: Int {
@@ -328,7 +371,7 @@ struct MonthStatsView: View {
     
     var body: some View {
         HStack(spacing: 30) {
-            StatBox(title: "Avg/Day", value: "\(averageML) mL", icon: "chart.line.uptrend.xyaxis", color: .blue)
+            StatBox(title: "Avg/Day", value: "\(averagePercentage)%", icon: "chart.line.uptrend.xyaxis", color: .blue)
             StatBox(title: "Streak", value: "\(currentStreak) days", icon: "flame.fill", color: .orange)
         }
     }
@@ -368,7 +411,7 @@ struct DayDetailView: View {
 
     private var dateString: String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"  // Compact format: "Jan 21"
+        formatter.dateFormat = "MMM d"
         return formatter.string(from: date)
     }
 
@@ -381,39 +424,36 @@ struct DayDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
+            // Header with date and training indicator
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(dateString)
-                            .font(.headline)
-                        
-                        if isTrainingDay {
-                            HStack(spacing: 4) {
-                                Image(systemName: "figure.run")
-                                    .font(.caption)
-                                Text("Training Day")
-                                    .font(.caption2)
-                            }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.orange)
-                            .clipShape(Capsule())
-                        }
-                    }
+                    Text(dateString)
+                        .font(.headline)
                     
-                    Text("\(Int(progress * 100))%")  // Only percentage, no goal text
+                    Text("\(Int(progress * 100))%")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
-                Image(systemName: progress >= 1.0 ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundStyle(progress >= 1.0 ? .green : .secondary)
+                // Training day indicator moved to top right
+                if isTrainingDay {
+                    HStack(spacing: 4) {
+                        Image(systemName: "figure.run")
+                            .font(.caption)
+                        Text("Training Day")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange)
+                    .clipShape(Capsule())
+                }
             }
+            .padding()
 
             Divider()
 
@@ -423,45 +463,51 @@ struct DayDetailView: View {
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 20)
             } else {
-                ForEach(entries.sorted { $0.timestamp > $1.timestamp }) { entry in
-                    HStack(spacing: 12) {
-                        Text(timeString(entry.timestamp))
-                            .font(.subheadline)
-                            .frame(width: 90, alignment: .leading)
-
-                        if let display = displayForEntry(entry) {
-                            ContainerIconView(container: display.container, size: 24)
-
-                            Text(display.text)
+                List {
+                    ForEach(entries.sorted { $0.timestamp > $1.timestamp }) { entry in
+                        HStack(spacing: 12) {
+                            // Time in 24-hour format
+                            Text(timeString(entry.timestamp))
                                 .font(.subheadline)
-                        } else {
-                            Text("Custom")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
+                                .frame(width: 50, alignment: .leading)
 
-                        Spacer()
+                            if let display = displayForEntry(entry) {
+                                ContainerIconView(container: display.container, size: 24)
 
-                        Button {
-                            onDelete(entry)
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .foregroundStyle(.red)
+                                Text(display.text)
+                                    .font(.subheadline)
+                            } else {
+                                Text("Custom")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
                         }
-                        .buttonStyle(.plain)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                onDelete(entry)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
-                    .padding(.vertical, 4)
                 }
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .frame(height: CGFloat(entries.count) * 56)
             }
         }
-        .padding()
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func timeString(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.timeStyle = .short
+        formatter.dateFormat = "HH:mm"  // 24-hour format
         return formatter.string(from: date)
     }
 

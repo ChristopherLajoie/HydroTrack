@@ -77,9 +77,15 @@ struct SettingsView: View {
                                     Text(container.name)
                                         .font(.headline)
                                         .foregroundStyle(.primary)
-                                    Text("\(container.volumeML) mL")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    if container.isCustom {
+                                        Text("Custom Amount")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("\(container.volumeML) mL")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                                 
                                 Spacer()
@@ -321,28 +327,6 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Container Icon View
-struct ContainerIconView: View {
-    let container: Container
-    let size: CGFloat
-    
-    var body: some View {
-        Group {
-            if let imageName = container.imageName,
-               let uiImage = Container.loadImage(filename: imageName) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
-            } else {
-                Text(container.emoji)
-                    .font(.system(size: size * 0.7))
-            }
-        }
-    }
-}
-
 // MARK: - Add Container View
 struct AddContainerView: View {
     @Environment(\.dismiss) private var dismiss
@@ -354,15 +338,26 @@ struct AddContainerView: View {
     @State private var selectedImage: UIImage?
     @State private var showImagePicker = false
     @State private var useImage = false
+    @State private var isCustom = false
     
     var body: some View {
         NavigationStack {
             Form {
+                Section("Container Type") {
+                    Picker("Type", selection: $isCustom) {
+                        Text("Fixed Volume").tag(false)
+                        Text("Custom Amount").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                
                 Section("Container Details") {
                     TextField("Name (e.g., Water Bottle)", text: $name)
                     
-                    TextField("Volume (mL)", text: $volumeML)
-                        .keyboardType(.numberPad)
+                    if !isCustom {
+                        TextField("Volume (mL)", text: $volumeML)
+                            .keyboardType(.numberPad)
+                    }
                 }
                 
                 Section("Icon") {
@@ -393,7 +388,7 @@ struct AddContainerView: View {
                                 VStack(alignment: .leading) {
                                     Text(selectedImage == nil ? "Choose Photo" : "Change Photo")
                                         .font(.headline)
-                                    Text("Take a photo or select from library")
+                                    Text("Select from library")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -418,7 +413,6 @@ struct AddContainerView: View {
                                 .font(.system(size: 40))
                                 .frame(width: 60)
                                 .onChange(of: selectedEmoji) { _, newValue in
-                                    // Keep only the first emoji (emojis can be 1-2 chars)
                                     selectedEmoji = String(newValue.prefix(2))
                                 }
                         }
@@ -438,7 +432,7 @@ struct AddContainerView: View {
                     Button("Add") {
                         addContainer()
                     }
-                    .disabled(name.isEmpty || volumeML.isEmpty || (useImage && selectedImage == nil))
+                    .disabled(name.isEmpty || (!isCustom && volumeML.isEmpty) || (useImage && selectedImage == nil))
                 }
             }
             .sheet(isPresented: $showImagePicker) {
@@ -448,7 +442,8 @@ struct AddContainerView: View {
     }
     
     private func addContainer() {
-        guard let volume = Int(volumeML), volume > 0 else { return }
+        let volume = isCustom ? 0 : (Int(volumeML) ?? 0)
+        guard isCustom || volume > 0 else { return }
         
         var imageName: String?
         if useImage, let image = selectedImage {
@@ -459,7 +454,8 @@ struct AddContainerView: View {
             name: name,
             volumeML: volume,
             emoji: selectedEmoji,
-            imageName: imageName
+            imageName: imageName,
+            isCustom: isCustom
         )
         containers.append(newContainer)
         
@@ -488,8 +484,10 @@ struct EditContainerView: View {
                 Section("Container Details") {
                     TextField("Name", text: $name)
                     
-                    TextField("Volume (mL)", text: $volumeML)
-                        .keyboardType(.numberPad)
+                    if !container.isCustom {
+                        TextField("Volume (mL)", text: $volumeML)
+                            .keyboardType(.numberPad)
+                    }
                 }
                 
                 Section("Icon") {
@@ -527,7 +525,7 @@ struct EditContainerView: View {
                                 VStack(alignment: .leading) {
                                     Text("Change Photo")
                                         .font(.headline)
-                                    Text("Take a photo or select from library")
+                                    Text("Select from library")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -552,7 +550,6 @@ struct EditContainerView: View {
                                 .font(.system(size: 40))
                                 .frame(width: 60)
                                 .onChange(of: selectedEmoji) { _, newValue in
-                                    // Keep only the first emoji (emojis can be 1-2 chars)
                                     selectedEmoji = String(newValue.prefix(2))
                                 }
                         }
@@ -572,7 +569,7 @@ struct EditContainerView: View {
                     Button("Save") {
                         saveContainer()
                     }
-                    .disabled(name.isEmpty || volumeML.isEmpty)
+                    .disabled(name.isEmpty || (!container.isCustom && volumeML.isEmpty))
                 }
             }
             .onAppear {
@@ -589,7 +586,8 @@ struct EditContainerView: View {
     }
     
     private func saveContainer() {
-        guard let volume = Int(volumeML), volume > 0 else { return }
+        let volume = container.isCustom ? 0 : (Int(volumeML) ?? 0)
+        guard container.isCustom || volume > 0 else { return }
         
         if let index = containers.firstIndex(where: { $0.id == container.id }) {
             var imageName: String? = currentImageName

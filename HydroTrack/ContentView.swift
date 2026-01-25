@@ -159,16 +159,29 @@ struct ContentView: View {
             }
             .scrollIndicators(.hidden)
             .sheet(item: $selectedContainer) { container in
-                FractionPickerSheet(
-                    container: container,
-                    onPick: { portion in
-                        addWater(container: container, portion: portion)
-                        selectedContainer = nil
-                    },
-                    onCancel: {
-                        selectedContainer = nil
-                    }
-                )
+                if container.isCustom {
+                    WheelPickerSheet(
+                        container: container,
+                        onPick: { amount in
+                            addWaterCustomAmount(amount: amount, isTrainingDay: isTrainingDay)
+                            selectedContainer = nil
+                        },
+                        onCancel: {
+                            selectedContainer = nil
+                        }
+                    )
+                } else {
+                    FractionPickerSheet(
+                        container: container,
+                        onPick: { portion in
+                            addWater(container: container, portion: portion)
+                            selectedContainer = nil
+                        },
+                        onCancel: {
+                            selectedContainer = nil
+                        }
+                    )
+                }
             }
             .overlay {
                 if progress >= 1.0 {
@@ -206,6 +219,33 @@ struct ContentView: View {
             containerID: container.id,
             fractionNumerator: portion.numerator,
             fractionDenominator: portion.denominator
+        )
+        modelContext.insert(entry)
+
+        waterAddedTrigger += 1
+        HapticManager.shared.impact(style: .light)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if oldProgress < 1.0 && progress >= 1.0 {
+                HapticManager.shared.notification(type: .success)
+                confettiCounter = 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    confettiCounter = 2
+                }
+            }
+        }
+    }
+    
+    private func addWaterCustomAmount(amount: Int, isTrainingDay: Bool) {
+        let oldProgress = progress
+
+        let entry = WaterEntry(
+            timestamp: Date(),
+            amountML: amount,
+            isTrainingDay: isTrainingDay,
+            containerID: nil,  // No container ID for custom amounts
+            fractionNumerator: nil,
+            fractionDenominator: nil
         )
         modelContext.insert(entry)
 
@@ -286,6 +326,74 @@ struct FractionPickerSheet: View {
     }
 }
 
+// MARK: - Wheel Picker Sheet
+struct WheelPickerSheet: View {
+    let container: Container
+    let onPick: (Int) -> Void
+    let onCancel: () -> Void
+    
+    @State private var selectedAmount = 250
+    
+    // Generate amounts from 50 to 1000 in 50mL increments
+    private let amounts = Array(stride(from: 50, through: 1000, by: 50))
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Container display
+                VStack(spacing: 12) {
+                    ContainerIconView(container: container, size: 80)
+                    
+                    Text(container.name)
+                        .font(.title2.bold())
+                    
+                    Text("\(selectedAmount) mL")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 40)
+                .padding(.bottom, 20)
+                
+                // Wheel picker
+                Picker("Amount", selection: $selectedAmount) {
+                    ForEach(amounts, id: \.self) { amount in
+                        Text("\(amount) mL")
+                            .tag(amount)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(height: 200)
+                
+                Spacer()
+                
+                // Confirm button
+                Button(action: {
+                    onPick(selectedAmount)
+                }) {
+                    Text("Add \(selectedAmount) mL")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 20)
+            }
+            .navigationTitle("Select Amount")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+}
+
 // MARK: - Container Button
 struct ContainerButton: View {
     let container: Container
@@ -301,9 +409,15 @@ struct ContainerButton: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
 
-                Text("\(container.volumeML) mL")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                if container.isCustom {
+                    Text("Custom")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(container.volumeML) mL")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
@@ -312,6 +426,28 @@ struct ContainerButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Container Icon View
+struct ContainerIconView: View {
+    let container: Container
+    let size: CGFloat
+    
+    var body: some View {
+        Group {
+            if let imageName = container.imageName,
+               let uiImage = Container.loadImage(filename: imageName) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
+            } else {
+                Text(container.emoji)
+                    .font(.system(size: size * 0.7))
+            }
+        }
     }
 }
 
@@ -439,12 +575,12 @@ struct EnhancedWaterGlassView: View {
                     Text("\(percentage)%")
                         .font(.system(size: 48, weight: .bold, design: .rounded))
                         .foregroundStyle(progress >= 0.5 ? .white : .blue)
-                        .shadow(color: .black.opacity(progress > 0.5 ? 0.2 : 0), radius: 2)
+                        .shadow(color: .black.opacity(progress >= 0.5 ? 0.2 : 0), radius: 2)
 
                     Text("\(currentAmount) / \(goalAmount) mL")
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                        .foregroundStyle(progress > 0.5 ? .white.opacity(0.8) : .secondary)
+                        .foregroundStyle(progress >= 0.5 ? .white.opacity(0.8) : .secondary)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)

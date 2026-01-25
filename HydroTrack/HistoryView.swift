@@ -13,13 +13,10 @@ struct HistoryView: View {
     @State private var selectedDate: Date? = Calendar.current.startOfDay(for: Date())
     @State private var showAddSheet = false
     @State private var selectedDateForEntry: Date?
+    @State private var containers: [Container] = []
     
     private let calendar = Calendar.current
     private let daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-    
-    private var containers: [Container] {
-        Array<Container>.fromJSON(containersJSON)
-    }
     
     var body: some View {
         NavigationStack {
@@ -126,6 +123,14 @@ struct HistoryView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .onAppear {
+                // Load containers on appear to ensure they're ready
+                containers = Array<Container>.fromJSON(containersJSON)
+            }
+            .onChange(of: containersJSON) { _, newValue in
+                // Update containers when JSON changes
+                containers = Array<Container>.fromJSON(newValue)
+            }
             .sheet(isPresented: $showAddSheet) {
                 if let date = selectedDateForEntry {
                     AddContainerToHistorySheet(
@@ -133,6 +138,11 @@ struct HistoryView: View {
                         containers: containers,
                         onAdd: { container, portion in
                             addWater(container: container, portion: portion, to: date)
+                            showAddSheet = false
+                            selectedDateForEntry = nil
+                        },
+                        onAddCustom: { amount in
+                            addWaterCustomAmount(amount: amount, to: date)
                             showAddSheet = false
                             selectedDateForEntry = nil
                         },
@@ -270,6 +280,27 @@ struct HistoryView: View {
             containerID: container.id,
             fractionNumerator: portion.numerator,
             fractionDenominator: portion.denominator
+        )
+        
+        modelContext.insert(entry)
+        HapticManager.shared.impact(style: .light)
+    }
+    
+    // Add custom amount to a specific date
+    private func addWaterCustomAmount(amount: Int, to date: Date) {
+        // Use the training day status for that specific date
+        let wasTrainingDay = isTrainingDayForDate(date)
+        
+        // Create timestamp at the end of the day to avoid conflicts
+        let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: date) ?? date
+        
+        let entry = WaterEntry(
+            timestamp: endOfDay,
+            amountML: amount,
+            isTrainingDay: wasTrainingDay,
+            containerID: nil,  // No container ID for custom amounts
+            fractionNumerator: nil,
+            fractionDenominator: nil
         )
         
         modelContext.insert(entry)
@@ -609,9 +640,14 @@ struct AddContainerToHistorySheet: View {
     let date: Date
     let containers: [Container]
     let onAdd: (Container, ContainerPortion) -> Void
+    let onAddCustom: (Int) -> Void
     let onCancel: () -> Void
     
     @State private var selectedContainer: Container?
+    @State private var selectedAmount = 250
+    
+    // Generate amounts from 50 to 1000 in 50mL increments
+    private let amounts = Array(stride(from: 50, through: 1000, by: 50))
     
     private var dateString: String {
         let formatter = DateFormatter()
@@ -628,50 +664,118 @@ struct AddContainerToHistorySheet: View {
         NavigationStack {
             Group {
                 if let container = selectedContainer {
-                    // Fraction selection view
-                    List {
-                        Section {
-                            HStack(spacing: 12) {
-                                HistoryContainerIconView(container: container, size: 56)
+                    if container.isCustom {
+                        // Wheel picker for custom container
+                        VStack(spacing: 0) {
+                            // Container display
+                            VStack(spacing: 12) {
+                                HStack(spacing: 12) {
+                                    HistoryContainerIconView(container: container, size: 56)
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(container.name)
-                                        .font(.headline)
-                                        .foregroundStyle(.primary)
-                                    Text("\(container.volumeML) mL")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-                                
-                                Button(action: { selectedContainer = nil }) {
-                                    Text("Change")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.blue)
-                                }
-                            }
-                            .padding(.vertical, 6)
-                        }
-
-                        Section("Select amount") {
-                            ForEach(ContainerPortion.allCases) { portion in
-                                Button {
-                                    onAdd(container, portion)
-                                } label: {
-                                    HStack {
-                                        Text(portion.label)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(container.name)
                                             .font(.headline)
                                             .foregroundStyle(.primary)
-
-                                        Spacer()
-
-                                        Text("\(ml(for: portion)) mL")
+                                        Text("Custom Amount")
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
                                     }
+
+                                    Spacer()
+                                    
+                                    Button(action: { selectedContainer = nil }) {
+                                        Text("Change")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.blue)
+                                    }
                                 }
-                                .buttonStyle(.plain)
+                                .padding(.horizontal)
+                                .padding(.top, 20)
+                                .padding(.bottom, 12)
+                            }
+                            
+                            Divider()
+                            
+                            VStack(spacing: 20) {
+                                Text("\(selectedAmount) mL")
+                                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.blue)
+                                    .padding(.top, 20)
+                                
+                                // Wheel picker
+                                Picker("Amount", selection: $selectedAmount) {
+                                    ForEach(amounts, id: \.self) { amount in
+                                        Text("\(amount) mL")
+                                            .tag(amount)
+                                    }
+                                }
+                                .pickerStyle(.wheel)
+                                .frame(height: 180)
+                                
+                                // Confirm button
+                                Button(action: {
+                                    onAddCustom(selectedAmount)
+                                }) {
+                                    Text("Add \(selectedAmount) mL")
+                                        .font(.headline)
+                                        .foregroundStyle(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 16)
+                                        .background(Color.blue)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+                                .padding(.horizontal)
+                                .padding(.bottom, 20)
+                            }
+                            
+                            Spacer()
+                        }
+                    } else {
+                        // Fraction selection view for regular containers
+                        List {
+                            Section {
+                                HStack(spacing: 12) {
+                                    HistoryContainerIconView(container: container, size: 56)
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(container.name)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        Text("\(container.volumeML) mL")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Spacer()
+                                    
+                                    Button(action: { selectedContainer = nil }) {
+                                        Text("Change")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
+                                .padding(.vertical, 6)
+                            }
+
+                            Section("Select amount") {
+                                ForEach(ContainerPortion.allCases) { portion in
+                                    Button {
+                                        onAdd(container, portion)
+                                    } label: {
+                                        HStack {
+                                            Text(portion.label)
+                                                .font(.headline)
+                                                .foregroundStyle(.primary)
+
+                                            Spacer()
+
+                                            Text("\(ml(for: portion)) mL")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
                     }
@@ -690,9 +794,15 @@ struct AddContainerToHistorySheet: View {
                                             Text(container.name)
                                                 .font(.headline)
                                                 .foregroundStyle(.primary)
-                                            Text("\(container.volumeML) mL")
-                                                .font(.subheadline)
-                                                .foregroundStyle(.secondary)
+                                            if container.isCustom {
+                                                Text("Custom Amount")
+                                                    .font(.subheadline)
+                                                    .foregroundStyle(.secondary)
+                                            } else {
+                                                Text("\(container.volumeML) mL")
+                                                    .font(.subheadline)
+                                                    .foregroundStyle(.secondary)
+                                            }
                                         }
 
                                         Spacer()

@@ -7,6 +7,7 @@ struct Container: Identifiable, Codable, Equatable {
     var volumeML: Int
     var emoji: String
     var imageName: String? // Optional: filename of saved image
+    var isCustom: Bool = false  // NEW: marks if this uses wheel picker
     
     static var defaults: [Container] = [
         Container(name: "Small Cup", volumeML: 250, emoji: "☕️", imageName: nil),
@@ -20,9 +21,9 @@ struct Container: Identifiable, Codable, Equatable {
 extension Container {
     // Save image to disk and return filename
     static func saveImage(_ image: UIImage) -> String? {
-        guard let data = image.pngData() else { return nil }  // Changed from jpegData to pngData
+        guard let data = image.pngData() else { return nil }
         
-        let filename = "\(UUID().uuidString).png"  // Changed from .jpg to .png
+        let filename = "\(UUID().uuidString).png"
         let url = getDocumentsDirectory().appendingPathComponent(filename)
         
         do {
